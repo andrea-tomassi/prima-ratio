@@ -77,7 +77,7 @@ curl http://localhost:8000/v1/models
 
 ---
 
-## 💬 Decisions in one call
+## 🎯 Decisions in one call
 
 ```bash
 curl http://localhost:8000/v1/systemone -H 'Content-Type: application/json' -d '{
