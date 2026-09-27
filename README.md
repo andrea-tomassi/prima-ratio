@@ -1,8 +1,10 @@
 # 🌳 semif-server
 
-A local, single-GPU **System One endpoint**: typed decisions with probabilities
-(yes/no, multiple-choice, scores) read directly from option logits — plus normal
-chat completions — from **one stock model loaded once**.
+A local, single-GPU **System One + Chat Completion endpoint** in a single
+package: the [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) engine ships
+inside the Docker image (pull, run, done) with **one stock model in VRAM**
+serving **typed decisions with probabilities** (yes/no, multiple-choice, scores
+read directly from option logits) **and normal chat completions**.
 
 Built on [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) (direct option-logit
 readout, MIT) serving `Qwen/Qwen3.5-4B`. API-compatible with TypeSafe's
