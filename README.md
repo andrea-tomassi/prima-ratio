@@ -6,9 +6,7 @@ chat completions — from **one stock model loaded once**.
 
 Built on [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) (direct option-logit
 readout, MIT) serving `Qwen/Qwen3.5-4B`. API-compatible with TypeSafe's
-System One / Jev pattern — the same shape used by
-[Rizzo Flow](https://github.com/Rizzo-AI-Academy/rizzo-flow) and
-[Kev](https://github.com/jaredpalmer/kev).
+System One / Jev pattern.
 
 Independent project; not affiliated with TypeSafe, Jev, SemIf or Qwen.
 
@@ -107,11 +105,10 @@ other. Removing it is one DELETE. The numbers live in
 calibration state and is gitignored on purpose.
 
 Two honest caveats: calibration adjusts *confidence*, not accuracy — if the
-model gets the answer wrong, no temperature will fix it (fine-tune instead:
-see [Rizzo Flow](https://github.com/Rizzo-AI-Academy/rizzo-flow) and
-[Kev](https://github.com/jaredpalmer/kev) for two different approaches). And a
-variant is valid for the exact model revision it was fitted on — after an
-upgrade, re-calibrate (your labeled examples are the whole cost of that).
+model gets the answer wrong, no temperature will fix it (that's a job for
+fine-tuning the base model). And a variant is valid for the exact model
+revision it was fitted on — after an upgrade, re-calibrate: your labeled
+examples are the whole cost of that.
 
 ## Security
 
@@ -124,9 +121,6 @@ external exposure.
   scoring method, shared-mode execution and calibration tooling
 - [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) (Apache-2.0) — the served model
 - [TypeSafe](https://docs.typesafe.ai/api) — the System One API pattern
-- Sibling projects worth reading:
-  [Rizzo Flow](https://github.com/Rizzo-AI-Academy/rizzo-flow) (fine-tuned local Jev),
-  [Kev](https://github.com/jaredpalmer/kev) (trainable Jev-like family)
 
 ## License
 
