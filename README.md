@@ -80,6 +80,28 @@ never baked into the image.
 
 ## From labeled examples to a REST model
 
+**Automated path**: label your examples, then publish the calibrated scenario with
+one call — the server scores, fits the temperature (out-of-fold ECE), hot-reloads
+and the suffix becomes callable immediately (no restart):
+
+```bash
+curl http://localhost:8000/v1/calibrate -H 'Content-Type: application/json' -d '{
+  "scenario": "mermaid-syntax",
+  "dataset_path": "/tmp/calib-fit60.jsonl",      # or "dataset": [ ...rows... ]
+  "heldout_path": "/tmp/calib-test20.jsonl"       # optional held-out validation
+}'
+# → {"scenario": "mermaid-syntax", "temperature": 2.719, "n_fit": 60, ...}
+
+# remove it again:
+curl -X DELETE http://localhost:8000/v1/calibrate/mermaid-syntax
+```
+
+⚠️ `/v1/calibrate` publishes model variants and is **unauthenticated by design** —
+auth is the reverse proxy's job (gate it with a dedicated token at Caddy, or keep
+the service LAN-only).
+
+**Manual walkthrough** (what the endpoint automates):
+
 Every calibrated scenario is one entry in **`build/calibration-manifest.json`**.
 That file is mounted into the container (`/app/build/calibration-manifest.json`)
 and read at startup: each entry becomes a callable model suffix via REST.

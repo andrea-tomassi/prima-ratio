@@ -6,7 +6,7 @@ Scenarios map to MODEL SUFFIXES (OpenRouter-style): the model field carries the 
 
     semif-qwen3.5-4b                     raw logits (uncalibrated)
     semif-qwen3.5-4b:vanilla             raw logits, explicit
-    semif-qwen3.5-4b:user-classification softmax(logits/T), T from the calibration manifest
+    semif-qwen3.5-4b:support-routing softmax(logits/T), T from the calibration manifest
 
 State is prefilled once and all questions are scored in parallel (SemIf shared mode,
 with per-row direct fallback when the tokenized state prefix is not stable).
@@ -15,6 +15,10 @@ Scenario temperatures live in build/calibration-manifest.json.
 """
 import json
 import math
+import os
+import random
+import re
+import tempfile
 import threading
 import time
 from typing import Any
@@ -31,6 +35,10 @@ REVISION = "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
 DEFAULT_TRUE = "Yes. The evidence supports an affirmative answer to the question."
 DEFAULT_FALSE = "No. The evidence supports a negative answer to the question."
 MANIFEST_PATH = "build/calibration-manifest.json"
+CALIB_FOLDS = 5
+CALIB_SEED = 217
+CALIB_MIN_ROWS_PER_TYPE = 10
+SCENARIO_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*$")
 
 model, tokenizer, metadata = load_causal_model(MODEL_BASE.split("-gguf")[0] if False else "Qwen/Qwen3.5-4B", REVISION, "auto", "bfloat16")
 
@@ -107,42 +115,70 @@ def build_row(qid: str, state: Any, q: Question) -> dict:
     }
 
 
-def _model_catalog():
-    entries = [{"name": MODEL_BASE, "description": "raw logits, uncalibrated (default)"}]
-    for name, e in sorted(SCENARIOS.items()):
-        desc = f"T={e.get('temperature')}"
-        if name == "vanilla":
-            desc = "raw logits, explicit (built-in)"
+
+def _golden_fit(pairs, bounds=(0.05, 20.0), iterations=60):
+    """pairs: [(logits, true_index)] — minimize mean NLL over T (golden section; NLL convex in 1/T)."""
+    def nll(T):
+        tot = 0.0
+        for logits, ti in pairs:
+            p = _softmax(logits, T)
+            tot += -math.log(max(p[ti], 1e-12))
+        return tot / len(pairs)
+    ratio = (math.sqrt(5) - 1) / 2
+    low, high = bounds
+    left, right = high - ratio * (high - low), low + ratio * (high - low)
+    f_left, f_right = nll(left), nll(right)
+    for _ in range(iterations):
+        if f_left < f_right:
+            high, right, f_right = right, left, f_left
+            left = high - ratio * (high - low)
+            f_left = nll(left)
         else:
-            desc += f"; ECE raw->out-of-fold {e.get('ece_raw')}->{e.get('ece_out_of_fold')}" if e.get("ece_raw") is not None else ""
-        entries.append({"name": f"{MODEL_BASE}:{name}", "description": (e.get("description") or "") + " — " + desc})
-    entries.append({
-        "name": "qwen3.5-4b-chat",
-        "description": "Same in-memory model, normal chat completions (POST /v1/chat/completions; OpenAI-shaped; optional 'thinking': false, default on)",
-    })
-    return entries
+            low, left, f_left = left, right, f_right
+            right = low + ratio * (high - low)
+            f_right = nll(right)
+    return (low + high) / 2
 
 
-def _suffix_instructions() -> dict:
-    return {
-        "how": "put the scenario after a ':' in the model field — softmax(logits/T) is applied; argmax never changes; ':vanilla' = raw logits, explicit; no suffix = raw (uncalibrated)",
-        "examples": [
-            {"model": MODEL_BASE, "note": "raw"},
-            {"model": f"{MODEL_BASE}:vanilla", "note": "raw, explicit"},
-            {"model": f"{MODEL_BASE}:user-classification", "note": "calibrated with the scenario temperature"},
-        ],
-        "unknown_suffix": "422 listing the available scenarios",
-        "add_new_scenario": "label 30-60 examples (SemIf JSONL with label index) -> semif-score --mode direct -> benchmarks/calibrate.py --gold ... --predictions ... --report build/<name>.json -> add entry to build/calibration-manifest.json -> restart",
-        "manifest": MANIFEST_PATH,
-    }
+def _ece(items, bins=10):
+    """items: [(confidence, correct)] — top-label expected calibration error."""
+    if not items:
+        return None
+    total = 0.0
+    for b in range(bins):
+        part = [x for x in items if min(bins - 1, int(x[0] * bins)) == b]
+        if part:
+            total += abs(sum(x[1] for x in part) / len(part) - sum(x[0] for x in part) / len(part)) * len(part) / len(items)
+    return round(total, 4)
+
+
+def _persist_manifest():
+    data = {"version": MANIFEST.get("version", 1), "scenarios": SCENARIOS}
+    d = os.path.dirname(MANIFEST_PATH) or "."
+    fd, tmp = tempfile.mkstemp(dir=d, suffix=".tmp")
+    with os.fdopen(fd, "w") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, MANIFEST_PATH)
 
 
 @app.get("/v1/models")
 def models():
-    return {
-        "models": _model_catalog(),
-        "model_suffixes": _suffix_instructions(),
-    }
+    """OpenAI v1 shape: scenario-calibrated variants are ordinary model ids
+    (suffix after ':'); fit metadata rides in the optional 'meta' field."""
+    now = int(time.time())
+    data = [{"id": MODEL_BASE, "object": "model", "created": now,
+             "owned_by": "semif-server", "meta": {"variant": "raw logits (uncalibrated default)"}}]
+    for name, e in sorted(SCENARIOS.items()):
+        data.append({
+            "id": f"{MODEL_BASE}:{name}",
+            "object": "model",
+            "created": now,
+            "owned_by": "semif-server",
+            "meta": {k: e.get(k) for k in ("temperature", "n_fit", "ece_raw", "ece_out_of_fold", "fitted_at", "description") if e.get(k) is not None},
+        })
+    data.append({"id": "qwen3.5-4b-chat", "object": "model", "created": now,
+                 "owned_by": "semif-server", "meta": {"variant": "normal chat completions (POST /v1/chat/completions)"}})
+    return {"object": "list", "data": data}
 
 
 @app.post("/v1/systemone")
@@ -305,6 +341,235 @@ def chat_completions(req: ChatReq):
             "tokens_per_second": round(gen_ids.shape[0] / dt, 1) if dt > 0 else None,
         },
     }
+
+
+class CalibrateReq(BaseModel):
+    scenario: str
+    dataset: list[dict] | None = None
+    dataset_path: str | None = None
+    heldout: list[dict] | None = None
+    heldout_path: str | None = None
+    overwrite: bool = False
+    description: str = ""
+
+
+def _load_jsonl(path: str) -> list[dict]:
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=400, detail=f"file not found: {path}")
+    rows = []
+    with open(path) as f:
+        for line in f:
+            if line.strip():
+                rows.append(json.loads(line))
+    if not rows:
+        raise HTTPException(status_code=400, detail=f"empty dataset: {path}")
+    return rows
+
+
+def _expand_labeled(row: dict, idx: int):
+    """Accept System One rows ({state, questions{id:{type,instructions,criteria,label}}})
+    or direct gold rows ({id, state, question, options, label}).
+    Returns [(gold_row, primitive_type, label)]."""
+    out = []
+    if "questions" in row:
+        state = row.get("state")
+        for qid, q in row["questions"].items():
+            crit = q.get("criteria") or {}
+            t = q.get("type", "choice")
+            if t == "noul":
+                options = [
+                    {"id": "true", "description": crit.get("true") or DEFAULT_TRUE},
+                    {"id": "false", "description": crit.get("false") or DEFAULT_FALSE},
+                ]
+            elif t == "choice":
+                options = [
+                    {"id": k, "description": (v if isinstance(v, str) and v.strip() else k)}
+                    for k, v in crit.items()
+                ]
+            else:
+                options = [{"id": str(i), "description": lvl} for i, lvl in enumerate(crit)]
+            rid = str(row.get("id", idx))
+            if len(row["questions"]) > 1:
+                rid = f"{rid}-{qid}"
+            out.append((
+                {"id": rid, "state": state, "question": (q.get("instructions") or "").strip() or "Decide based on the state.", "options": options},
+                t,
+                q.get("label"),
+            ))
+    else:
+        out.append((
+            {"id": str(row.get("id", f"row{idx}")), "state": row.get("state"),
+             "question": (row.get("question") or "Decide based on the state.").strip(),
+             "options": row.get("options", [])},
+            row.get("type", "gold"),
+            row.get("label"),
+        ))
+    return out
+
+
+@app.post("/v1/calibrate")
+def calibrate(req: CalibrateReq):
+    """Automated scenario pipeline: score labeled rows, fit the temperature,
+    validate out-of-fold, publish into the manifest and hot-reload. No restart."""
+    if not SCENARIO_RE.fullmatch(req.scenario):
+        raise HTTPException(status_code=400, detail="scenario name must match [a-z0-9]+(-[a-z0-9]+)*")
+    if req.scenario == "vanilla":
+        raise HTTPException(status_code=400, detail="'vanilla' is reserved (built-in raw scenario)")
+    if req.scenario in SCENARIOS and not req.overwrite:
+        raise HTTPException(status_code=409, detail={
+            "error": f"scenario '{req.scenario}' already exists",
+            "hint": "pass overwrite=true to replace it",
+            "current": SCENARIOS[req.scenario],
+        })
+
+    def load(part, path):
+        if part is not None:
+            return part
+        if path:
+            return _load_jsonl(path)
+        return None
+
+    fit_raw = load(req.dataset, req.dataset_path)
+    if not fit_raw:
+        raise HTTPException(status_code=400, detail="no dataset: pass 'dataset' (list) or 'dataset_path'")
+    held_raw = load(req.heldout, req.heldout_path)
+
+    rows = []  # (gold_row, primitive_type, label)
+    for idx, src in enumerate(fit_raw):
+        rows.extend(_expand_labeled(src, idx))
+    per_type = {}
+    for _, t, _ in rows:
+        per_type[t] = per_type.get(t, 0) + 1
+    short = {t: c for t, c in per_type.items() if c < CALIB_MIN_ROWS_PER_TYPE}
+    if short:
+        raise HTTPException(status_code=400, detail={
+            "error": f"at least {CALIB_MIN_ROWS_PER_TYPE} rows per primitive type required",
+            "rows_per_type": per_type,
+        })
+    for gold, _, label in rows:
+        validate_row(gold)
+        ids = [o["id"] for o in gold["options"]]
+        if not isinstance(label, int) or isinstance(label, bool) or not 0 <= label < len(ids):
+            raise HTTPException(status_code=400, detail=f"{gold['id']}: label must be an option index (0..{len(ids)-1})")
+    if len({g["id"] for g, _, _ in rows}) != len(rows):
+        raise HTTPException(status_code=400, detail="duplicate row ids in dataset")
+
+    # score (direct, serialized with chat/scoring lock)
+    pairs, conf_items, input_tokens = [], [], 0
+    t0 = time.perf_counter()
+    with _GEN_LOCK:
+        for gold, _, label in rows:
+            res = direct_module.score(model, tokenizer, gold, metadata)
+            logits = res["option_logits"]
+            ti = res["option_ids"].index(gold["options"][label]["id"])
+            pairs.append((logits, ti))
+            probs = _softmax(logits)
+            conf_items.append((max(probs), int(probs.index(max(probs)) == ti)))
+            input_tokens += res.get("input_tokens", 0)
+    score_seconds = round(time.perf_counter() - t0, 2)
+
+    temperature = round(_golden_fit(pairs), 6)
+
+    # honest out-of-fold ECE: group-disjoint folds, T fitted per fold
+    groups = sorted({g["id"] for g, _, _ in rows})
+    rng = random.Random(CALIB_SEED)
+    rng.shuffle(groups)
+    fold_of = {g: i % CALIB_FOLDS for i, g in enumerate(groups)}
+    ood = []
+    fold_temperatures = []
+    for fold in range(CALIB_FOLDS):
+        train_pairs = [p for p, (gold, _, _l) in zip(pairs, rows) if fold_of[gold["id"]] != fold]
+        if not train_pairs:
+            continue
+        t_f = _golden_fit(train_pairs)
+        fold_temperatures.append(round(t_f, 4))
+        for p, (gold, _, _l) in zip(pairs, rows):
+            if fold_of[gold["id"]] == fold:
+                pr = _softmax(p[0], t_f)
+                ood.append((max(pr), int(pr.index(max(pr)) == p[1])))
+    ece_raw = _ece(conf_items)
+    ece_ood = _ece(ood)
+    accuracy = round(sum(ok for _, ok in conf_items) / len(conf_items), 4)
+
+    fingerprint = {"model": "Qwen/Qwen3.5-4B", "revision": REVISION}
+    entry = {
+        "temperature": temperature,
+        "n_fit": len(pairs),
+        "rows_per_type": per_type,
+        "ece_raw": ece_raw,
+        "ece_out_of_fold": ece_ood,
+        "accuracy_unchanged": accuracy,
+        "fingerprint": fingerprint,
+        "fitted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "description": req.description or f"calibrated via /v1/calibrate on {len(pairs)} rows",
+    }
+    SCENARIOS[req.scenario] = entry
+    _persist_manifest()
+
+    heldout_metrics = None
+    if held_raw:
+        hrows = []
+        for idx, src in enumerate(held_raw):
+            hrows.extend(_expand_labeled(src, idx))
+        hpairs, hitems = [], []
+        with _GEN_LOCK:
+            for gold, _, label in hrows:
+                validate_row(gold)
+                res = direct_module.score(model, tokenizer, gold, metadata)
+                logits = res["option_logits"]
+                ti = res["option_ids"].index(gold["options"][label]["id"])
+                hpairs.append((logits, ti))
+                pr = _softmax(logits, temperature)
+                hitems.append((max(pr), int(pr.index(max(pr)) == ti)))
+        hacc = round(sum(ok for _, ok in hitems) / len(hitems), 4) if hitems else None
+        hnll = round(sum(-math.log(max(_softmax(l, temperature)[t], 1e-12)) for l, t in hpairs) / len(hpairs), 4) if hpairs else None
+        heldout_metrics = {"rows": len(hpairs), "accuracy": hacc, "ece_held_out": _ece(hitems), "nll_held_out": hnll}
+
+    return {
+        "scenario": req.scenario,
+        "temperature": temperature,
+        "n_fit": len(pairs),
+        "ece_raw": ece_raw,
+        "ece_out_of_fold": ece_ood,
+        "accuracy_unchanged": accuracy,
+        "fingerprint": fingerprint,
+        "status": "published + hot-reloaded (use model suffix semif-qwen3.5-4b:" + req.scenario + "); requires held-out validation",
+        "score_seconds": score_seconds,
+        "fold_temperatures": fold_temperatures,
+        "heldout": heldout_metrics,
+        "input_tokens": input_tokens,
+    }
+
+
+def _do_delete_scenario(scenario: str):
+    if scenario == "vanilla":
+        raise HTTPException(status_code=400, detail="'vanilla' is built-in (raw logits) and cannot be deleted")
+    if scenario not in SCENARIOS:
+        raise HTTPException(status_code=404, detail={
+            "error": f"scenario '{scenario}' not found",
+            "available": sorted(SCENARIOS),
+        })
+    SCENARIOS.pop(scenario)
+    _persist_manifest()
+    return {
+        "deleted": scenario,
+        "scenarios": sorted(SCENARIOS),
+        "status": "removed + hot-reloaded (the model suffix now returns 422 'unknown scenario')",
+    }
+
+
+@app.delete("/v1/calibrate/{scenario}")
+def delete_calibrate(scenario: str):
+    return _do_delete_scenario(scenario)
+
+
+class DeleteReq(BaseModel):
+    scenario: str
+
+
+@app.post("/v1/calibrate/delete")
+def delete_calibrate_post(req: DeleteReq):
+    return _do_delete_scenario(req.scenario)
 
 
 if __name__ == "__main__":
