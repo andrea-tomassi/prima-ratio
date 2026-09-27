@@ -25,6 +25,10 @@ One small service does three things people usually glue together:
   **model variant**: same API, same server, just a different name after a
   colon. Creating or deleting one is a single HTTP call — no restart, no
   rebuild, no machine-learning expertise required.
+- **Two APIs, one VRAM footprint.** The ~8 GB that host the decision engine
+  also serve a full OpenAI-shaped **chat completions** endpoint — same model,
+  same process, zero extra memory. Decisions for your pipelines, a
+  conversational fallback for everything else, in one deployment.
 
 And it speaks the standard: any OpenAI-compatible client works unchanged —
 the variants are simply model names.
