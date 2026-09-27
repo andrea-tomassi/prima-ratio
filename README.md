@@ -148,10 +148,10 @@ Prebuilt images on ghcr (public):
 docker pull ghcr.io/andrea-tomassi/semif-server:latest
 ```
 
-| Tag | Contenuto |
+| Tag | Content |
 |---|---|
-| `latest` | ultima build stabile |
-| `v0.1.0` | prima release — System One + chat + calibrazione automatizzata |
+| `latest` | latest stable build |
+| `v0.1.0` | first release — System One + chat + automated calibration |
 
 Notes and changelogs: [Releases](https://github.com/andrea-tomassi/semif-server/releases).
 
