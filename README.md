@@ -12,6 +12,24 @@ System One / Jev pattern — the same shape used by
 
 Independent project; not affiliated with TypeSafe, Jev, SemIf or Qwen.
 
+## Quick Start (NVIDIA GPU)
+
+```bash
+git clone https://github.com/andrea-tomassi/semif-server && cd semif-server
+docker compose up -d          # builds and binds :8000
+curl http://localhost:8000/v1/models
+```
+
+- **Requires an NVIDIA GPU** (≥ 8 GB VRAM for the 4B bf16 model) and the
+  [NVIDIA container toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+- Model weights download once to the mounted HF cache on first start (~8 GB) —
+  they are never baked into the image.
+- The shipped manifest includes a toy `:test` scenario so the
+  [model-suffix mechanism](#scenario-calibration-via-model-suffixes) works out of the box.
+- **CPU-only / other accelerators**: not packaged yet. The scoring core is
+  language-model-agnostic (SemIf also runs llama.cpp GGUF and MLX backends) —
+  a CPU build-arg variant is on the roadmap.
+
 ## Endpoints
 
 | Method | Path | Purpose |

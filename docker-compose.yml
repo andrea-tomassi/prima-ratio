@@ -1,7 +1,7 @@
 services:
   semif-server:
     build: .
-    image: registry.sharelock.tech/semif-server:latest
+    image: ghcr.io/andrea-tomassi/semif-server:latest
     ports:
       - "8000:8000"
     environment:
