@@ -7,8 +7,11 @@ serving **typed decisions with probabilities** (yes/no, multiple-choice, scores
 read directly from option logits) **and normal chat completions**.
 
 Built on [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) (direct option-logit
-readout, MIT) serving `Qwen/Qwen3.5-4B`. API-compatible with TypeSafe's
-System One / Jev pattern.
+readout, MIT). Two image variants, same API: **`:latest`** serves
+`Qwen/Qwen3.5-4B` bf16 through transformers; **`:gguf`** serves any local
+`.gguf` checkpoint through llama.cpp with opt-in full GPU offload (this is how
+a 12B Q6_K_XL runs smoothly on a 16 GB card).
+API-compatible with TypeSafe's System One / Jev pattern.
 
 Independent project; not affiliated with TypeSafe, Jev, SemIf or Qwen.
 
@@ -61,9 +64,29 @@ curl http://localhost:8000/v1/models
   [NVIDIA container toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
 - ⬇️ Model weights download once to the mounted HF cache on first start (~8 GB) —
   they are never baked into the image.
-- 🧪 **CPU-only / other accelerators**: not packaged yet. The scoring core is
-  language-model-agnostic (SemIf also runs llama.cpp GGUF and MLX backends) —
-  a CPU variant is on the roadmap.
+- 🧪 **CPU-only / bigger quantized models**: use the `:gguf` variant below — the
+  same image runs without a GPU (point it at a GGUF, keep
+  `SEMIF_LLAMA_GPU_LAYERS=0`) and scales to full GPU offload (`-1`) on cards
+  that fit the checkpoint.
+
+### 📦 Bigger models — the GGUF variant
+
+Same endpoints, same calibration flow; llama.cpp does the forward pass on a
+local GGUF checkpoint (scoring **and** chat share the loaded weights):
+
+```bash
+docker run -d --gpus all -p 8000:8000 --restart unless-stopped \
+  -v ~/.cache/huggingface:/cache/huggingface \
+  -v /path/to/models:/models:ro \
+  -e SEMIF_GGUF=/models/your-model.gguf \
+  ghcr.io/andrea-tomassi/semif-server:gguf
+```
+
+At startup the image verifies the GGUF checksum and checks that the file's
+vocabulary matches the pinned tokenizer (a mismatch stops the server instead of
+serving quietly wrong decisions). GPU offload is opt-in through the same
+llama.cpp semantics you already know: `0` = CPU only, `-1` = all layers, `N` =
+first N layers.
 
 ---
 
@@ -131,7 +154,13 @@ other. Removing it is one DELETE. The numbers live in
 `build/calibration-manifest.json` — **back that file up**, it is your
 calibration state and is gitignored on purpose.
 
-### ⚠️ Two honest caveats
+> 📐 **Worked example**: [`calibration/examples/mermaid-syntax/`](calibration/examples/mermaid-syntax/)
+> runs the full flow on a task with verifiable ground truth — *will this
+> Mermaid diagram render?* — including how the labels were verified with a
+> headless-browser render oracle and the held-out numbers against a frontier
+> SaaS baseline.
+
+### ⚠️ Three honest caveats
 
 - 🎚️ Calibration adjusts **confidence**, not accuracy — if the model gets the
   answer wrong, no temperature will fix it (that's a job for fine-tuning the
@@ -139,6 +168,9 @@ calibration state and is gitignored on purpose.
 - 🔖 A variant is valid for the **exact model revision** it was fitted on —
   after an upgrade, re-calibrate: your labeled examples are the whole cost of
   that.
+- 🔎 With the GGUF variant, scores are **conditional on the quantized weights**
+  (the GGUF checksum is recorded in every response); expect small numeric
+  differences from a bf16 run, not different behaviour.
 
 ---
 
@@ -152,7 +184,8 @@ docker pull ghcr.io/andrea-tomassi/semif-server:latest
 
 | Tag | Content |
 |---|---|
-| `latest` | latest stable build |
+| `latest` | latest stable build — torch backend, Qwen3.5-4B bf16 |
+| `gguf` | llama.cpp backend — any local `.gguf`, opt-in full GPU offload |
 | `v0.1.0` | first release — System One + chat + automated calibration |
 
 Notes and changelogs: [Releases](https://github.com/andrea-tomassi/semif-server/releases).
@@ -163,6 +196,21 @@ Notes and changelogs: [Releases](https://github.com/andrea-tomassi/semif-server/
 
 🔒 LAN-only by default — put the service behind a reverse proxy with auth for
 any external exposure.
+
+---
+
+## ⚙️ Environment reference
+
+| Variable | Default (`latest` / `gguf`) | Purpose |
+|---|---|---|
+| `SEMIF_BACKEND` | `torch` / `llamacpp` | scoring backend |
+| `SEMIF_GGUF` | — / **required** | path to the local `.gguf` checkpoint |
+| `SEMIF_LLAMA_GPU_LAYERS` | `0` / `-1` | llama.cpp offload: `0` CPU, `-1` all layers, `N` first N |
+| `SEMIF_MODEL` | `Qwen/Qwen3.5-4B` / `unsloth/gemma-4-12b-it` | HF tokenizer source (template + provenance) |
+| `SEMIF_REVISION` | pinned per model | revision recorded in variant fingerprints |
+| `SEMIF_MODEL_NAME` | `semif-qwen3.5-4b` / `semif-gemma4-12b` | public model-id base for variants |
+| `SEMIF_MANIFEST` | `build/calibration-manifest.json` | calibration state file (mount it, back it up) |
+| `SEMIF_MAX_TOKENS` | `4096` | scoring context budget (no truncation — rows that don't fit are refused) |
 
 ---
 
