@@ -140,6 +140,23 @@ calibration state and is gitignored on purpose.
 
 ---
 
+## 📦 Releases & Docker image
+
+Prebuilt images on ghcr (public):
+
+```bash
+docker pull ghcr.io/andrea-tomassi/semif-server:latest
+```
+
+| Tag | Contenuto |
+|---|---|
+| `latest` | ultima build stabile |
+| `v0.1.0` | prima release — System One + chat + calibrazione automatizzata |
+
+Notes and changelogs: [Releases](https://github.com/andrea-tomassi/semif-server/releases).
+
+---
+
 ## 🔐 Security
 
 🔒 LAN-only by default — put the service behind a reverse proxy with auth for
