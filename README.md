@@ -82,11 +82,11 @@ docker run -d --gpus all -p 8000:8000 --restart unless-stopped \
   ghcr.io/andrea-tomassi/semif-server:gguf
 ```
 
-At startup the image verifies the GGUF checksum and checks that the file's
-vocabulary matches the pinned tokenizer (a mismatch stops the server instead of
-serving quietly wrong decisions). GPU offload is opt-in through the same
-llama.cpp semantics you already know: `0` = CPU only, `-1` = all layers, `N` =
-first N layers.
+At startup the image checks that the GGUF's vocabulary tokenizes exactly like
+the pinned tokenizer (a mismatch stops the server instead of serving quietly
+wrong decisions) and records the file's sha256 in every response. GPU offload
+is opt-in through the same llama.cpp semantics you already know: `0` = CPU
+only, `-1` = all layers, `N` = first N layers.
 
 ---
 
