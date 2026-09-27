@@ -186,6 +186,7 @@ docker pull ghcr.io/andrea-tomassi/semif-server:latest
 |---|---|
 | `latest` | latest stable build — torch backend, Qwen3.5-4B bf16 |
 | `gguf` | llama.cpp backend — any local `.gguf`, opt-in full GPU offload |
+| `v0.2.0` | GGUF variant + worked calibration example ([release notes](https://github.com/andrea-tomassi/semif-server/releases/tag/v0.2.0)) |
 | `v0.1.0` | first release — System One + chat + automated calibration |
 
 Notes and changelogs: [Releases](https://github.com/andrea-tomassi/semif-server/releases).
