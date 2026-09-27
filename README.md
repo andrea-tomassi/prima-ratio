@@ -78,18 +78,91 @@ python api_server.py          # binds 0.0.0.0:8000
 The model weights live in a mounted HF cache (see `docker-compose.yml`) — they are
 never baked into the image.
 
-## Add a calibrated scenario
+## From labeled examples to a REST model
 
-1. Label **30–60 examples** for the new workload (SemIf JSONL: `state`, `question`,
-   `options`, `label` = winning option index) — see `calibration/examples/`
-2. Score them: `semif-score --mode direct --model Qwen/Qwen3.5-4B --revision <pin> --input yours.jsonl --output preds.jsonl`
-3. Fit: `python benchmarks/calibrate.py --gold yours.jsonl --predictions preds.jsonl --report build/<name>.json`
-   (the report includes group-disjoint out-of-fold ECE — honest, auditable)
-4. Add the entry to `build/calibration-manifest.json` and restart
+Every calibrated scenario is one entry in **`build/calibration-manifest.json`**.
+That file is mounted into the container (`/app/build/calibration-manifest.json`)
+and read at startup: each entry becomes a callable model suffix via REST.
+The full path, step by step:
+
+**1. Label 30–60 examples** for the new workload — SemIf JSONL, one row per
+example, with the winning option as `label`:
+
+```json
+{"id": "ex1",
+ "state": "The text to judge (string or JSON object)",
+ "question": "Is this urgent?",
+ "options": [{"id": "yes", "description": "Conveys urgency"},
+             {"id": "no",  "description": "Routine request"}],
+ "label": 0}
+```
+
+Keep 10–20% aside as held-out data — the fit report is only trustworthy if you
+can check it on rows the fit never saw.
+
+**2. Score them** — the scorer records the raw option logits your examples
+produce. Inside the running container (model already loaded there):
+
+```bash
+docker cp yours.jsonl semif-server:/tmp/
+docker exec semif-server semif-score --mode direct \
+  --model Qwen/Qwen3.5-4B --revision 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a \
+  --input /tmp/yours.jsonl --output /tmp/preds.jsonl
+docker cp semif-server:/tmp/preds.jsonl .
+```
+
+**3. Fit the temperature** — one scalar against your labels, with
+group-disjoint out-of-fold ECE (honest, auditable). Needs the SemIf repo
+checkout:
+
+```bash
+python benchmarks/calibrate.py --gold yours.jsonl --predictions preds.jsonl \
+  --report build/<scenario>.json
+```
+
+The report JSON contains the fitted temperature and the metrics. Copy the
+`shipped_temperature` value into your manifest entry:
+
+```json
+{ "version": 1,
+  "scenarios": {
+    "vanilla": { "temperature": 1.0, "built_in": true, "description": "raw logits, no temperature scaling" },
+    "test":    { "temperature": 1.37, "description": "EXAMPLE — toy scenario shipped with the repo" },
+    "<scenario>": { "temperature": 0.85, "n_fit": 45,
+                    "description": "what this scenario decides, and on what data it was fitted" } } }
+```
+
+**4. Put the manifest where the server reads it** — it must sit at
+`build/calibration-manifest.json` **on the host, next to `docker-compose.yml`**:
+the compose file mounts that path into the container
+(`/app/build/calibration-manifest.json`), and the server parses it once at
+startup. Then:
+
+```bash
+docker compose restart     # no rebuild needed — the file is mounted
+```
+
+**5. Use it via REST** — the scenario is now a first-class model:
+
+```bash
+curl http://localhost:8000/v1/models            # lists semif-qwen3.5-4b:<scenario>
+curl http://localhost:8000/v1/systemone -H 'Content-Type: application/json' -d '{
+  "state": "...", "model": "semif-qwen3.5-4b:<scenario>",
+  "questions": { ... } }'                       # probabilities are now temperature-scaled
+```
+
+Unknown suffix → `422` with the list of available scenarios. Every response
+carries `x_semif`: timing, score mode (`shared`/`direct`), applied temperature
+and an honest `probability_status`. Shared-state scoring falls back to per-row
+direct scoring automatically when the tokenized state prefix is not stable
+(BPE boundary effects).
 
 Temperature scaling is a single scalar: it fixes global confidence, not ranking
 or accuracy. When accuracy itself must move, fine-tune the base model instead
-(see the sibling projects for two different approaches to that).
+(see the sibling projects for two different approaches to that). And since a
+temperature is only valid for the model revision it was fitted on: **if you bump
+the SemIf pin or the base model, re-calibrate** — your labeled examples are the
+whole cost of that.
 
 ## Layout
 
