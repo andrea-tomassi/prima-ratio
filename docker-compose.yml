@@ -1,6 +1,7 @@
 services:
   semif-server:
     build: .
+    container_name: semif-server
     image: ghcr.io/andrea-tomassi/semif-server:latest
     ports:
       - "8000:8000"
