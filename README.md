@@ -38,6 +38,17 @@ One small service does three things people usually glue together:
 
 ## 🚀 Quick Start (NVIDIA GPU)
 
+🐳 **Immagine pronta all'uso** su ghcr — niente clone, niente build:
+
+```bash
+docker run -d --gpus all -p 8000:8000 --restart unless-stopped \
+  -v ~/.cache/huggingface:/cache/huggingface \
+  ghcr.io/andrea-tomassi/semif-server:latest
+curl http://localhost:8000/v1/models
+```
+
+Oppure dal sorgente:
+
 ```bash
 git clone https://github.com/andrea-tomassi/semif-server && cd semif-server
 docker compose up -d          # builds and binds :8000
