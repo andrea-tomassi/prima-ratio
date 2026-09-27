@@ -12,6 +12,25 @@ System One / Jev pattern — the same shape used by
 
 Independent project; not affiliated with TypeSafe, Jev, SemIf or Qwen.
 
+## Why it's comfortable
+
+One small service does three things people usually glue together:
+
+- **Typed decisions instead of prompts.** You describe the state and the
+  question; the answer is a choice with probabilities — no answer sentence to
+  parse, no JSON repair, no retry loops. The model never generates tokens:
+  scoring one decision takes about a tenth of a second.
+- **Your own confidence.** Feed it a few dozen labeled examples and it
+  re-calibrates its probabilities on your workload. Confidence you can put a
+  threshold on, with honest out-of-fold numbers to back it.
+- **Model variants without MLOps.** Every calibrated workload becomes a
+  **model variant**: same API, same server, just a different name after a
+  colon. Creating or deleting one is a single HTTP call — no restart, no
+  rebuild, no machine-learning expertise required.
+
+And it speaks the standard: any OpenAI-compatible client works unchanged —
+the variants are simply model names.
+
 ## Quick Start (NVIDIA GPU)
 
 ```bash
@@ -32,15 +51,13 @@ curl http://localhost:8000/v1/models
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET`  | `/v1/models` | OpenAI-shaped model list; calibrated scenarios appear as suffixed ids |
+| `GET`  | `/v1/models` | model catalog, including your calibrated variants |
 | `POST` | `/v1/systemone` | typed decisions: `{state, model, questions{id:{type,instructions,criteria}}}` |
-| `POST` | `/v1/chat/completions` | OpenAI-shaped chat on the same in-memory model (`"thinking": false` to skip reasoning) |
-| `POST` | `/v1/calibrate` | fit + publish a calibrated scenario (see below) |
-| `DELETE` | `/v1/calibrate/<scenario>` | remove a calibrated scenario |
+| `POST` | `/v1/chat/completions` | OpenAI-shaped chat (`"thinking": false` to skip reasoning) |
+| `POST` | `/v1/calibrate` | fit + publish a new model variant from labeled examples |
+| `DELETE` | `/v1/calibrate/<variant>` | remove a variant |
 
-## Basic usage
-
-**Typed decisions** — pick a model, describe the state, ask typed questions:
+## Decisions in one call
 
 ```bash
 curl http://localhost:8000/v1/systemone -H 'Content-Type: application/json' -d '{
@@ -49,56 +66,52 @@ curl http://localhost:8000/v1/systemone -H 'Content-Type: application/json' -d '
   "questions": {"tipo": {"type": "choice", "instructions": "Human or service account?",
     "criteria": {"human": "Real person", "service_account": "Non-human identity"}}}
 }'
-# → {"answers": {"tipo": {"choice": "human", "probabilities": {...}}}, ...}
 ```
 
-Question types: `noul` (yes/no probability), `choice` (options + probabilities +
-confidence), `score` (ordered levels → weighted score). Unknown model suffix →
-`422` with the list of available ones.
+The answer gives you the winning option, the probability of every option and a
+confidence score — plus timing and an honest note about whether the
+probabilities are calibrated. Ask several questions at once (yes/no, choices,
+scores): they share the state, so you pay for reading it only once.
 
-**Chat** — same OpenAI shape as always:
+Chat works the same way you expect:
 
 ```bash
 curl http://localhost:8000/v1/chat/completions -H 'Content-Type: application/json' -d '{
-  "messages": [{"role": "user", "content": "Hello"}],
-  "max_tokens": 100, "thinking": false
+  "messages": [{"role": "user", "content": "Hello"}], "max_tokens": 100
 }'
 ```
 
-## Calibrated scenarios (model suffixes)
+## Model variants: your own calibrated confidence
 
-A *scenario* is a workload where the model's confidence has been re-scaled on
-your own labeled examples: it becomes a **model suffix** and is used like any
-other model.
+This is the part that makes the server *yours*. A **variant** is the base model
+with its confidence re-scaled on a workload you care about — routing tickets,
+classifying accounts, judging alerts. You bring labeled examples (30–60 are
+plenty: the answer you expect for each case), give the workload a name, and
+the server does the rest: it scores your examples, measures how far the model's
+confidence is from your labels, computes the correction, validates it on data
+it hasn't seen, and publishes the result. One call, no restart, no
+machine-learning knowledge.
 
 ```bash
-# fit + publish in one call (server scores, fits the temperature, hot-reloads)
 curl http://localhost:8000/v1/calibrate -H 'Content-Type: application/json' -d '{
   "scenario": "support-routing",
   "dataset": [ {"state": "...", "questions": {"q": {"type": "choice",
-               "instructions": "...", "criteria": {...}, "label": 1}}}, ... ],
-  "heldout":  [ ... ]
+               "instructions": "...", "criteria": {...}, "label": 1}}}, ... ]
 }'
-
-# then use it — the suffix appears in GET /v1/models too
-curl http://localhost:8000/v1/systemone -H 'Content-Type: application/json' -d '{
-  "state": "...", "model": "semif-qwen3.5-4b:support-routing", "questions": { ... }
-}'
-
-# remove it
-curl -X DELETE http://localhost:8000/v1/calibrate/support-routing
 ```
 
-- ≥ 10 labeled rows per question type; the response reports temperature, ECE
-  (raw and out-of-fold) and accuracy — argmax never changes, only confidence
-- hot-reload: no restart; scenarios live in `build/calibration-manifest.json`
-  (survives restarts; **keep this file backed up** — it is gitignored)
-- the shipped manifest includes a toy `:test` scenario so the mechanism works
-  out of the box; temperature scaling fixes confidence, not accuracy — for that,
-  fine-tune the base model
-- the manual recipe (scorer + `benchmarks/calibrate.py` + held-out methodology)
-  lives in the upstream [SemIf repo](https://github.com/TheoLeeCJ/SemIf-OpenJev):
-  see `benchmarks/` and `docs/CALIBRATION.md` there
+From that moment `semif-qwen3.5-4b:support-routing` is just another model name:
+it shows up in `GET /v1/models` (with its fit numbers) and answers like any
+other. Removing it is one DELETE. The numbers live in
+`build/calibration-manifest.json` — **back that file up**, it is your
+calibration state and is gitignored on purpose.
+
+Two honest caveats: calibration adjusts *confidence*, not accuracy — if the
+model gets the answer wrong, no temperature will fix it (fine-tune instead:
+see [Rizzo Flow](https://github.com/Rizzo-AI-Academy/rizzo-flow) and
+[Kev](https://github.com/jaredpalmer/kev) for two different approaches). And a
+variant is valid for the exact model revision it was fitted on — after an
+upgrade, re-calibrate (your labeled examples are the whole cost of that).
 
 ## Security
 
