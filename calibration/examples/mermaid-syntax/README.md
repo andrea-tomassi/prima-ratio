@@ -40,11 +40,14 @@ kind, render-verification outcome).
 ## ▶️ Run the calibration
 
 ```bash
-curl http://localhost:8000/v1/calibrate -H 'Content-Type: application/json' -d '{
-  "scenario": "mermaid-syntax",
-  "dataset_path": "calibration/examples/mermaid-syntax/fit60.jsonl"
-}'
+python3 -c 'import json; rows=[json.loads(l) for l in open("calibration/examples/mermaid-syntax/fit60.jsonl")]; print(json.dumps({"scenario":"mermaid-syntax","dataset":rows}))' \
+  | curl -s http://localhost:8000/v1/calibrate -H 'Content-Type: application/json' -d @-
 ```
+
+(If the server process can read the repo filesystem — e.g. you run it from
+source — the same call works with
+`"dataset_path": "calibration/examples/mermaid-syntax/fit60.jsonl"` instead of
+the inline `dataset`.)
 
 The server scores the 60 rows, fits the temperature, reports the fit numbers,
 publishes `semif-gemma4-12b:mermaid-syntax` and hot-reloads it. From then on it
