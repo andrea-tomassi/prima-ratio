@@ -72,7 +72,7 @@ curl http://localhost:8000/v1/models
 | `GET`  | `/v1/models` | 📋 model catalog, including your calibrated variants |
 | `POST` | `/v1/systemone` | 🎯 typed decisions: `{state, model, questions{id:{type,instructions,criteria}}}` |
 | `POST` | `/v1/chat/completions` | 💬 OpenAI-shaped chat (`"thinking": false` to skip reasoning) |
-| `POST` | `/v1/calibrate` | 🎓 fit + publish a new model variant from labeled examples |
+| `POST` | `/v1/calibrate` | 🧪 fit + publish a new model variant from labeled examples |
 | `DELETE` | `/v1/calibrate/<variant>` | 🗑️ remove a variant |
 
 ---
