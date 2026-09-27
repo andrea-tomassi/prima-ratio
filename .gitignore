@@ -1,0 +1,16 @@
+# real calibration data stays local — never commit domain data
+calibration/*.jsonl
+calibration/*.json
+!calibration/examples/**
+
+# fitted reports (the manifest example IS committed)
+build/calib-*.json
+build/*.calibrated.jsonl
+build/gold-*.jsonl
+build/pred-*.jsonl
+
+# python / tooling
+__pycache__/
+.venv/
+*.pyc
+*.log

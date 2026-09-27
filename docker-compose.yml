@@ -1,0 +1,20 @@
+services:
+  semif-server:
+    build: .
+    image: registry.sharelock.tech/semif-server:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - HF_HOME=/cache/huggingface
+    volumes:
+      - /home/sharelock/.cache/huggingface:/cache/huggingface
+      - ./calibration:/app/calibration:ro
+      - ./build:/app/build
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
