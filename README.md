@@ -24,176 +24,86 @@ curl http://localhost:8000/v1/models
   [NVIDIA container toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
 - Model weights download once to the mounted HF cache on first start (~8 GB) —
   they are never baked into the image.
-- The shipped manifest includes a toy `:test` scenario so the
-  [model-suffix mechanism](#scenario-calibration-via-model-suffixes) works out of the box.
 - **CPU-only / other accelerators**: not packaged yet. The scoring core is
   language-model-agnostic (SemIf also runs llama.cpp GGUF and MLX backends) —
-  a CPU build-arg variant is on the roadmap.
+  a CPU variant is on the roadmap.
 
 ## Endpoints
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET`  | `/v1/models` | model catalog **including scenario suffixes** + usage docs |
+| `GET`  | `/v1/models` | OpenAI-shaped model list; calibrated scenarios appear as suffixed ids |
 | `POST` | `/v1/systemone` | typed decisions: `{state, model, questions{id:{type,instructions,criteria}}}` |
 | `POST` | `/v1/chat/completions` | OpenAI-shaped chat on the same in-memory model (`"thinking": false` to skip reasoning) |
+| `POST` | `/v1/calibrate` | fit + publish a calibrated scenario (see below) |
+| `DELETE` | `/v1/calibrate/<scenario>` | remove a calibrated scenario |
 
-## Scenario calibration via model suffixes
+## Basic usage
 
-The API stays 100% standard: scenarios are **model suffixes** (OpenRouter-style).
-A temperature is fitted per workload and applied as `softmax(logits/T)` — the
-argmax never changes, only the confidence.
+**Typed decisions** — pick a model, describe the state, ask typed questions:
 
 ```bash
-# raw logits (uncalibrated)
 curl http://localhost:8000/v1/systemone -H 'Content-Type: application/json' -d '{
-  "state": "Entra ID account record: displayName='"'"'svc.noreply'"'"', userPrincipalName='"'"'svc.noreply@example.com'"'"'.",
+  "state": "Entra ID account record: displayName='"'"'Mario Rossi'"'"', userPrincipalName='"'"'m.rossi@example.com'"'"'.",
   "model": "semif-qwen3.5-4b",
   "questions": {"tipo": {"type": "choice", "instructions": "Human or service account?",
     "criteria": {"human": "Real person", "service_account": "Non-human identity"}}}
 }'
-
-# calibrated with the scenario temperature
-#   ... "model": "semif-qwen3.5-4b:user-classification",
-
-# raw, explicit
-#   ... "model": "semif-qwen3.5-4b:vanilla",
+# → {"answers": {"tipo": {"choice": "human", "probabilities": {...}}}, ...}
 ```
 
-- unknown suffix → `422` with the list of available scenarios
-- every response carries `x_semif`: timing, score mode (`shared`/`direct`),
-  applied temperature and an honest `probability_status`
-- shared-state scoring falls back to per-row direct scoring automatically when
-  the tokenized state prefix is not stable (BPE boundary effects)
+Question types: `noul` (yes/no probability), `choice` (options + probabilities +
+confidence), `score` (ordered levels → weighted score). Unknown model suffix →
+`422` with the list of available ones.
 
-## Run
+**Chat** — same OpenAI shape as always:
 
 ```bash
-docker compose up -d          # needs NVIDIA container toolkit; weights download on first start
-# or local:
-uv venv && uv pip install -e '.[test]' fastapi uvicorn flash-linear-attention
-python api_server.py          # binds 0.0.0.0:8000
-```
-
-The model weights live in a mounted HF cache (see `docker-compose.yml`) — they are
-never baked into the image.
-
-## From labeled examples to a REST model
-
-**Automated path**: label your examples, then publish the calibrated scenario with
-one call — the server scores, fits the temperature (out-of-fold ECE), hot-reloads
-and the suffix becomes callable immediately (no restart):
-
-```bash
-curl http://localhost:8000/v1/calibrate -H 'Content-Type: application/json' -d '{
-  "scenario": "mermaid-syntax",
-  "dataset_path": "/tmp/calib-fit60.jsonl",      # or "dataset": [ ...rows... ]
-  "heldout_path": "/tmp/calib-test20.jsonl"       # optional held-out validation
+curl http://localhost:8000/v1/chat/completions -H 'Content-Type: application/json' -d '{
+  "messages": [{"role": "user", "content": "Hello"}],
+  "max_tokens": 100, "thinking": false
 }'
-# → {"scenario": "mermaid-syntax", "temperature": 2.719, "n_fit": 60, ...}
-
-# remove it again:
-curl -X DELETE http://localhost:8000/v1/calibrate/mermaid-syntax
 ```
 
-⚠️ `/v1/calibrate` publishes model variants and is **unauthenticated by design** —
-auth is the reverse proxy's job (gate it with a dedicated token at Caddy, or keep
-the service LAN-only).
+## Calibrated scenarios (model suffixes)
 
-**Manual walkthrough** (what the endpoint automates):
-
-Every calibrated scenario is one entry in **`build/calibration-manifest.json`**.
-That file is mounted into the container (`/app/build/calibration-manifest.json`)
-and read at startup: each entry becomes a callable model suffix via REST.
-The full path, step by step:
-
-**1. Label 30–60 examples** for the new workload — SemIf JSONL, one row per
-example, with the winning option as `label`:
-
-```json
-{"id": "ex1",
- "state": "The text to judge (string or JSON object)",
- "question": "Is this urgent?",
- "options": [{"id": "yes", "description": "Conveys urgency"},
-             {"id": "no",  "description": "Routine request"}],
- "label": 0}
-```
-
-Keep 10–20% aside as held-out data — the fit report is only trustworthy if you
-can check it on rows the fit never saw.
-
-**2. Score them** — the scorer records the raw option logits your examples
-produce. Inside the running container (model already loaded there):
+A *scenario* is a workload where the model's confidence has been re-scaled on
+your own labeled examples: it becomes a **model suffix** and is used like any
+other model.
 
 ```bash
-docker cp yours.jsonl semif-server:/tmp/
-docker exec semif-server semif-score --mode direct \
-  --model Qwen/Qwen3.5-4B --revision 851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a \
-  --input /tmp/yours.jsonl --output /tmp/preds.jsonl
-docker cp semif-server:/tmp/preds.jsonl .
-```
+# fit + publish in one call (server scores, fits the temperature, hot-reloads)
+curl http://localhost:8000/v1/calibrate -H 'Content-Type: application/json' -d '{
+  "scenario": "support-routing",
+  "dataset": [ {"state": "...", "questions": {"q": {"type": "choice",
+               "instructions": "...", "criteria": {...}, "label": 1}}}, ... ],
+  "heldout":  [ ... ]
+}'
 
-**3. Fit the temperature** — one scalar against your labels, with
-group-disjoint out-of-fold ECE (honest, auditable). Needs the SemIf repo
-checkout:
-
-```bash
-python benchmarks/calibrate.py --gold yours.jsonl --predictions preds.jsonl \
-  --report build/<scenario>.json
-```
-
-The report JSON contains the fitted temperature and the metrics. Copy the
-`shipped_temperature` value into your manifest entry:
-
-```json
-{ "version": 1,
-  "scenarios": {
-    "vanilla": { "temperature": 1.0, "built_in": true, "description": "raw logits, no temperature scaling" },
-    "test":    { "temperature": 1.37, "description": "EXAMPLE — toy scenario shipped with the repo" },
-    "<scenario>": { "temperature": 0.85, "n_fit": 45,
-                    "description": "what this scenario decides, and on what data it was fitted" } } }
-```
-
-**4. Put the manifest where the server reads it** — it must sit at
-`build/calibration-manifest.json` **on the host, next to `docker-compose.yml`**:
-the compose file mounts that path into the container
-(`/app/build/calibration-manifest.json`), and the server parses it once at
-startup. Then:
-
-```bash
-docker compose restart     # no rebuild needed — the file is mounted
-```
-
-**5. Use it via REST** — the scenario is now a first-class model:
-
-```bash
-curl http://localhost:8000/v1/models            # lists semif-qwen3.5-4b:<scenario>
+# then use it — the suffix appears in GET /v1/models too
 curl http://localhost:8000/v1/systemone -H 'Content-Type: application/json' -d '{
-  "state": "...", "model": "semif-qwen3.5-4b:<scenario>",
-  "questions": { ... } }'                       # probabilities are now temperature-scaled
+  "state": "...", "model": "semif-qwen3.5-4b:support-routing", "questions": { ... }
+}'
+
+# remove it
+curl -X DELETE http://localhost:8000/v1/calibrate/support-routing
 ```
 
-Unknown suffix → `422` with the list of available scenarios. Every response
-carries `x_semif`: timing, score mode (`shared`/`direct`), applied temperature
-and an honest `probability_status`. Shared-state scoring falls back to per-row
-direct scoring automatically when the tokenized state prefix is not stable
-(BPE boundary effects).
+- ≥ 10 labeled rows per question type; the response reports temperature, ECE
+  (raw and out-of-fold) and accuracy — argmax never changes, only confidence
+- hot-reload: no restart; scenarios live in `build/calibration-manifest.json`
+  (survives restarts; **keep this file backed up** — it is gitignored)
+- the shipped manifest includes a toy `:test` scenario so the mechanism works
+  out of the box; temperature scaling fixes confidence, not accuracy — for that,
+  fine-tune the base model
+- the manual recipe (scorer + `benchmarks/calibrate.py` + held-out methodology)
+  lives in the upstream [SemIf repo](https://github.com/TheoLeeCJ/SemIf-OpenJev):
+  see `benchmarks/` and `docs/CALIBRATION.md` there
 
-Temperature scaling is a single scalar: it fixes global confidence, not ranking
-or accuracy. When accuracy itself must move, fine-tune the base model instead
-(see the sibling projects for two different approaches to that). And since a
-temperature is only valid for the model revision it was fitted on: **if you bump
-the SemIf pin or the base model, re-calibrate** — your labeled examples are the
-whole cost of that.
+## Security
 
-## Layout
-
-```
-api_server.py                     the System One + chat wrapper (this is the product)
-build/calibration-manifest.json   committed EXAMPLE manifest (scenario "test")
-calibration/examples/             toy labeled set demonstrating the pipeline
-calibration/*.[jsonl|json]        YOUR real calibration data — gitignored, stays local
-```
+LAN-only by default — put the service behind a reverse proxy with auth for any
+external exposure.
 
 ## Credits
 
