@@ -1,16 +1,24 @@
 services:
   semif-server:
-    build: .
+    # torch variant (Qwen3.5-4B bf16):   ghcr.io/andrea-tomassi/semif-server:latest
+    # GGUF variant (llama.cpp + local .gguf): ghcr.io/andrea-tomassi/semif-server:gguf
+    image: ${SEMIF_IMAGE:-ghcr.io/andrea-tomassi/semif-server:latest}
     container_name: semif-server
-    image: ghcr.io/andrea-tomassi/semif-server:latest
     ports:
       - "8000:8000"
+      - "10000:8000"          # second port kept for the reverse-proxy route
     environment:
       - HF_HOME=/cache/huggingface
+      - SEMIF_MANIFEST=/app/build/calibration-manifest.json
+      # GGUF variant only (image tag :gguf, defaults already baked: backend
+      # llamacpp + full GPU offload) — point it at the mounted model:
+      # - SEMIF_GGUF=/models/gemma-4-12b-it-UD-Q6_K_XL.gguf
+      # - SEMIF_LLAMA_GPU_LAYERS=-1
+      # - SEMIF_MODEL_NAME=semif-gemma4-12b
     volumes:
-      - /home/sharelock/.cache/huggingface:/cache/huggingface
-      - ./calibration:/app/calibration:ro
-      - ./build:/app/build
+      - ${HF_CACHE_DIR:-${HOME}/.cache/huggingface}:/cache/huggingface
+      - ./build:/app/build                       # calibration manifest lives here
+      - ${GGUF_DIR:-./models}:/models:ro         # GGUF variant: model directory
     deploy:
       resources:
         reservations:

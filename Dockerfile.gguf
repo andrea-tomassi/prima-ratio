@@ -1,0 +1,81 @@
+# syntax=docker/dockerfile:1
+# ---------------------------------------------------------------------------
+# GGUF variant: llama.cpp scoring backend with opt-in full GPU offload.
+#
+# Multi-stage — the nvcc toolchain only exists in the builder; the runtime
+# carries the CUDA runtime libraries plus the finished venv. llama-cpp-python
+# is compiled once with CUDA kernels (GGML_CUDA=on); the model itself is a
+# local .gguf file mounted at runtime (never baked into the image).
+#
+# Run (see README > GGUF / GPU backend):
+#   docker run --gpus all -p 8000:8000 \
+#     -v $HOME/.cache/huggingface:/cache/huggingface \
+#     -v ./build:/app/build \
+#     -v /path/to/models:/models:ro \
+#     -e SEMIF_GGUF=/models/model.gguf \
+#     ghcr.io/andrea-tomassi/semif-server:gguf
+# ---------------------------------------------------------------------------
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3.10 python3.10-venv python3.10-dev git build-essential ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+
+# CUDA arch must be pinned explicitly: the build container has no GPU, so the
+# "native" detection falls back to a 5.2 PTX target and every kernel is
+# JIT-compiled at runtime (~3x slower). 89 = Ada / RTX 4060 Ti; use 86 for
+# Ampere (RTX 3090) or a list like "86;89" for mixed fleets.
+ARG CUDA_ARCHS=89
+ENV CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS}"
+
+RUN uv venv /opt/venv --python python3.10
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH"
+
+# CPU-only torch (the llamacpp backend uses torch only for tokenizer plumbing);
+# keeps ~3 GB of CUDA torch wheels out of the build.
+RUN uv pip install --no-cache torch==2.10.0 --index-url https://download.pytorch.org/whl/cpu
+
+# pin: bump deliberately (calibration fingerprints are bound to the served revision)
+ARG SEMIF_GIT_REV=23cf1f39fc9534fe81437200959b6dfc7106e45a
+RUN git clone https://github.com/TheoLeeCJ/SemIf-OpenJev.git /tmp/semif \
+    && git -C /tmp/semif checkout --quiet ${SEMIF_GIT_REV} \
+    && uv pip install --no-cache "/tmp/semif" fastapi uvicorn "llama-cpp-python==0.3.35" \
+    && rm -rf /root/.cache/uv /root/.cache/pip /tmp/semif
+
+# opt-in GPU offload: n_gpu_layers is read from SEMIF_LLAMA_GPU_LAYERS at load
+# time (llama.cpp semantics: 0 = CPU only, -1 = all layers, N = first N).
+# Default stays 0 so the upstream CPU-only behaviour is unchanged unless asked.
+RUN SITE="$(python -c 'import pathlib, semif_phase1; print(pathlib.Path(semif_phase1.__file__).parent)')" \
+    && sed -i 's/params\.n_gpu_layers = 0/params.n_gpu_layers = int(os.environ.get("SEMIF_LLAMA_GPU_LAYERS", "0"))/' "$SITE/llamacpp_backend.py" \
+    && sed -i 's/"n_gpu_layers": 0,/"n_gpu_layers": int(os.environ.get("SEMIF_LLAMA_GPU_LAYERS", "0")),/' "$SITE/llamacpp_backend.py" \
+    && grep -q SEMIF_LLAMA_GPU_LAYERS "$SITE/llamacpp_backend.py"
+# note: `import llama_cpp` is NOT run at build time — libllama.so links against
+# libcuda.so.1, which only exists at runtime through the NVIDIA container toolkit.
+
+# ---------------------------------------------------------------------------
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3.10 libgomp1 ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/venv /opt/venv
+
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH" \
+    HF_HOME=/cache/huggingface \
+    SEMIF_BACKEND=llamacpp \
+    SEMIF_LLAMA_GPU_LAYERS=-1 \
+    SEMIF_MANIFEST=/app/build/calibration-manifest.json
+
+WORKDIR /app
+COPY api_server.py .
+
+EXPOSE 8000
+CMD ["python", "api_server.py"]

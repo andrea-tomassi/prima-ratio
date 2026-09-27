@@ -12,6 +12,14 @@ State is prefilled once and all questions are scored in parallel (SemIf shared m
 with per-row direct fallback when the tokenized state prefix is not stable).
 Also: POST /v1/chat/completions — normal chat on the same in-memory model.
 Scenario temperatures live in build/calibration-manifest.json.
+
+Backends (env-driven, see README):
+    SEMIF_BACKEND=torch      HF transformers bf16 checkpoint (default; Qwen3.5-4B)
+    SEMIF_BACKEND=llamacpp   local GGUF through llama.cpp (SEMIF_GGUF=path,
+                             SEMIF_LLAMA_GPU_LAYERS=-1 for full GPU offload;
+                             scoring and chat share the loaded weights)
+Environment: SEMIF_MODEL / SEMIF_REVISION / SEMIF_MODEL_NAME / SEMIF_MANIFEST /
+SEMIF_MAX_TOKENS also override their defaults.
 """
 import json
 import math
@@ -30,17 +38,43 @@ from semif_phase1 import direct as direct_module
 from semif_phase1.core import load_causal_model, validate_row
 from semif_phase1.shared import score_shared
 
-MODEL_BASE = "semif-qwen3.5-4b"
-REVISION = "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
+BACKEND = os.environ.get("SEMIF_BACKEND", "torch").strip().lower()
+if BACKEND not in {"torch", "llamacpp"}:
+    raise SystemExit(f"SEMIF_BACKEND must be 'torch' or 'llamacpp', got {BACKEND!r}")
+_DEFAULTS = {
+    "torch": ("Qwen/Qwen3.5-4B", "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a", "semif-qwen3.5-4b"),
+    "llamacpp": ("unsloth/gemma-4-12b-it", "55cdba0740a9765956f49501f689a66b098feda3", "semif-gemma4-12b"),
+}
+_DEFAULT_SOURCE, _DEFAULT_REVISION, _DEFAULT_NAME = _DEFAULTS[BACKEND]
+MODEL_SOURCE = os.environ.get("SEMIF_MODEL", _DEFAULT_SOURCE)
+REVISION = os.environ.get("SEMIF_REVISION", _DEFAULT_REVISION)
+MODEL_BASE = os.environ.get("SEMIF_MODEL_NAME", _DEFAULT_NAME)
+GGUF_PATH = os.environ.get("SEMIF_GGUF")
+MAX_TOKENS = int(os.environ.get("SEMIF_MAX_TOKENS", "4096"))
+CHAT_MODEL = os.environ.get("SEMIF_CHAT_NAME", MODEL_BASE.removeprefix("semif-") + "-chat")
 DEFAULT_TRUE = "Yes. The evidence supports an affirmative answer to the question."
 DEFAULT_FALSE = "No. The evidence supports a negative answer to the question."
-MANIFEST_PATH = "build/calibration-manifest.json"
+MANIFEST_PATH = os.environ.get("SEMIF_MANIFEST", "build/calibration-manifest.json")
 CALIB_FOLDS = 5
 CALIB_SEED = 217
 CALIB_MIN_ROWS_PER_TYPE = 10
 SCENARIO_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*$")
 
-model, tokenizer, metadata = load_causal_model(MODEL_BASE.split("-gguf")[0] if False else "Qwen/Qwen3.5-4B", REVISION, "auto", "bfloat16")
+if BACKEND == "llamacpp":
+    if not GGUF_PATH or not os.path.isfile(GGUF_PATH):
+        raise SystemExit("SEMIF_BACKEND=llamacpp requires SEMIF_GGUF pointing at a local .gguf file")
+    from pathlib import Path
+
+    from semif_phase1 import llamacpp_backend
+
+    model, tokenizer, metadata = llamacpp_backend.load_model(
+        MODEL_SOURCE, REVISION, Path(GGUF_PATH), context_tokens=MAX_TOKENS)
+    _score_direct = llamacpp_backend.score
+    _score_shared = llamacpp_backend.score_shared
+else:
+    model, tokenizer, metadata = load_causal_model(MODEL_SOURCE, REVISION, "auto", "bfloat16")
+    _score_direct = direct_module.score
+    _score_shared = score_shared
 
 
 def _softmax(vals, T=1.0):
@@ -77,15 +111,6 @@ class Req(BaseModel):
     state: Any
     model: str = MODEL_BASE
     questions: dict[str, Question]
-
-
-class ChatReq(BaseModel):
-    messages: list[dict]
-    model: str = "qwen3.5-4b-chat"
-    temperature: float = 0.7
-    top_p: float = 0.8
-    max_tokens: int = 512
-    thinking: bool = True
 
 
 def build_row(qid: str, state: Any, q: Question) -> dict:
@@ -176,7 +201,7 @@ def models():
             "owned_by": "semif-server",
             "meta": {k: e.get(k) for k in ("temperature", "n_fit", "ece_raw", "ece_out_of_fold", "fitted_at", "description") if e.get(k) is not None},
         })
-    data.append({"id": "qwen3.5-4b-chat", "object": "model", "created": now,
+    data.append({"id": CHAT_MODEL, "object": "model", "created": now,
                  "owned_by": "semif-server", "meta": {"variant": "normal chat completions (POST /v1/chat/completions)"}})
     return {"object": "list", "data": data}
 
@@ -209,13 +234,13 @@ def systemone(req: Req):
     t0 = time.perf_counter()
     with _GEN_LOCK:
         try:
-            results, timing = score_shared(model, tokenizer, rows, metadata)
+            results, timing = _score_shared(model, tokenizer, rows, metadata)
             score_mode = "shared"
         except ValueError:
             # shared mode requires a stable tokenized state prefix (BPE boundary effects,
             # e.g. a state ending in a quote char); fall back to per-row direct scoring —
             # identical readout, no prefix reuse.
-            results = [direct_module.score(model, tokenizer, r, metadata) for r in rows]
+            results = [_score_direct(model, tokenizer, r, metadata) for r in rows]
             timing = {"mode": "direct-fallback"}
             score_mode = "direct"
     latency_ms = round((time.perf_counter() - t0) * 1000, 1)
@@ -279,16 +304,179 @@ def systemone(req: Req):
 
 class ChatReq(BaseModel):
     messages: list[dict]
-    model: str = "qwen3.5-4b-chat"
+    model: str = CHAT_MODEL
     temperature: float = 0.7
     top_p: float = 0.8
     max_tokens: int = 512
     thinking: bool = True
 
 
+# --- GGUF chat: generation on a secondary llama.cpp context (weights shared) ---
+_GGUF_CHAT = {"context": None, "capacity": 0}
+_CHAT_LOCK = threading.Lock()
+
+
+def _gguf_decode(lib, context, tokens: list[int], start: int, want_logits: bool):
+    """Batch decode on the chat context (mirrors _Engine._decode in the backend)."""
+    for offset in range(0, len(tokens), 512):
+        chunk = tokens[offset:offset + 512]
+        batch = lib.llama_batch_init(len(chunk), 0, 1)
+        try:
+            for index, token in enumerate(chunk):
+                batch.token[index] = token
+                batch.pos[index] = start + offset + index
+                batch.n_seq_id[index] = 1
+                batch.seq_id[index][0] = 0
+                batch.logits[index] = int(want_logits and offset + index == len(tokens) - 1)
+            batch.n_tokens = len(chunk)
+            if lib.llama_decode(context, batch):
+                raise RuntimeError("llama_decode failed for the chat context")
+        finally:
+            lib.llama_batch_free(batch)
+    if not want_logits:
+        return None
+    import ctypes
+
+    import numpy
+
+    pointer = lib.llama_get_logits_ith(context, -1)
+    if not pointer:
+        raise RuntimeError("llama.cpp returned no chat logits")
+    return numpy.ctypeslib.as_array(
+        ctypes.cast(pointer, ctypes.POINTER(ctypes.c_float)), shape=(model.engine.vocab_size,)
+    ).copy()
+
+
+def _gguf_chat_context(lib, native_model, need_tokens: int):
+    """Lazily create a dedicated chat context on the already-loaded model."""
+    context = _GGUF_CHAT["context"]
+    if context is not None and need_tokens <= _GGUF_CHAT["capacity"]:
+        return context
+    if context is not None:
+        lib.llama_free(context)
+        _GGUF_CHAT["context"] = None
+    params = lib.llama_context_default_params()
+    params.n_ctx = max(need_tokens, 2048)
+    params.n_seq_max = 1
+    params.n_outputs_max = 1
+    context = lib.llama_init_from_model(native_model, params)
+    if not context:
+        raise RuntimeError("llama.cpp failed to create the chat context")
+    capacity = int(lib.llama_n_ctx(context))
+    if need_tokens > capacity:
+        lib.llama_free(context)
+        raise RuntimeError("chat prompt does not fit the chat context")
+    _GGUF_CHAT["context"] = context
+    _GGUF_CHAT["capacity"] = capacity
+    return context
+
+
+def _sample_token(logits, temperature, top_p, rng):
+    import numpy
+
+    if temperature <= 0:
+        return int(numpy.argmax(logits))
+    values = logits.astype(numpy.float64) / temperature
+    values -= values.max()
+    probs = numpy.exp(values)
+    probs /= probs.sum()
+    if 0 < top_p < 1.0:
+        order = numpy.argsort(-probs)
+        cumulative = numpy.cumsum(probs[order])
+        cutoff = int(numpy.searchsorted(cumulative, top_p)) + 1
+        keep = order[:cutoff]
+        masked = numpy.zeros_like(probs)
+        masked[keep] = probs[keep]
+        probs = masked / masked.sum()
+    return int(rng.choice(len(probs), p=probs))
+
+
+def _gguf_chat_completions(req: ChatReq):
+    from semif_phase1.llamacpp_backend import _gguf_piece, _gguf_tokenize
+
+    lib = model.engine.lib
+    vocab = model.vocab
+    try:
+        prompt = tokenizer.apply_chat_template(
+            req.messages, tokenize=False, add_generation_prompt=True,
+            enable_thinking=req.thinking)
+    except TypeError:
+        prompt = tokenizer.apply_chat_template(
+            req.messages, tokenize=False, add_generation_prompt=True)
+    ids = _gguf_tokenize(lib, vocab, prompt)
+    if not ids:
+        raise HTTPException(status_code=400, detail="empty chat prompt")
+
+    t0 = time.perf_counter()
+    import numpy
+
+    with _CHAT_LOCK, _GEN_LOCK:
+        context = _gguf_chat_context(lib, model.engine.model, len(ids) + req.max_tokens + 8)
+        lib.llama_memory_clear(lib.llama_get_memory(context), True)
+        logits = _gguf_decode(lib, context, ids, 0, True)
+        eos_ids = set()
+        try:
+            eos_ids.add(int(lib.llama_vocab_eos(vocab)))
+        except (AttributeError, TypeError):
+            pass
+        rng = numpy.random.default_rng()
+        pieces = bytearray()
+        generated = 0
+        position = len(ids)
+        stop_markers = ("<turn|>", "<end_of_turn>", "<eos>", "</s>")
+        for _ in range(max(0, req.max_tokens)):
+            token = _sample_token(logits, req.temperature, req.top_p, rng)
+            if token in eos_ids:
+                break
+            pieces += _gguf_piece(lib, vocab, token)
+            generated += 1
+            seen = pieces.decode("utf-8", errors="ignore")
+            if any(marker in seen for marker in stop_markers):
+                break
+            logits = _gguf_decode(lib, context, [token], position, True)
+            position += 1
+    dt = time.perf_counter() - t0
+
+    text = pieces.decode("utf-8", errors="ignore")
+    for marker in stop_markers:
+        text = text.replace(marker, "")
+    reasoning = None
+    if "<|channel>thought" in text:
+        # Gemma-style thought channel: <|channel>thought ... <channel|> then the answer
+        _, _, after = text.partition("<|channel>thought")
+        thought, closed, rest = after.partition("<channel|>")
+        reasoning = thought.strip() or None
+        text = rest if closed else ""  # truncated inside the thought: no answer yet
+    if "</think>" in text:
+        think, _, text = text.partition("</think>")
+        reasoning = think.replace("<think>", "").strip() or reasoning
+    content = text.replace("<channel|>", "").replace("<|channel>thought", "").strip()
+
+    message = {"role": "assistant", "content": content}
+    if reasoning:
+        message["reasoning_content"] = reasoning
+    return {
+        "id": f"chatcmpl-{CHAT_MODEL}",
+        "object": "chat.completion",
+        "model": req.model,
+        "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
+        "usage": {
+            "prompt_tokens": len(ids),
+            "completion_tokens": generated,
+            "total_tokens": len(ids) + generated,
+        },
+        "timings": {
+            "generation_seconds": round(dt, 2),
+            "tokens_per_second": round(generated / dt, 1) if dt > 0 and generated else None,
+        },
+    }
+
+
 @app.post("/v1/chat/completions")
 def chat_completions(req: ChatReq):
-    """OpenAI-compatible chat on the same in-memory stock Qwen3.5-4B."""
+    """OpenAI-compatible chat on the same in-memory model."""
+    if BACKEND == "llamacpp":
+        return _gguf_chat_completions(req)
     import torch
 
     try:
@@ -327,7 +515,7 @@ def chat_completions(req: ChatReq):
     if reasoning:
         message["reasoning_content"] = reasoning
     return {
-        "id": "chatcmpl-semif-4b",
+        "id": f"chatcmpl-{CHAT_MODEL}",
         "object": "chat.completion",
         "model": req.model,
         "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
@@ -459,7 +647,7 @@ def calibrate(req: CalibrateReq):
     t0 = time.perf_counter()
     with _GEN_LOCK:
         for gold, _, label in rows:
-            res = direct_module.score(model, tokenizer, gold, metadata)
+            res = _score_direct(model, tokenizer, gold, metadata)
             logits = res["option_logits"]
             ti = res["option_ids"].index(gold["options"][label]["id"])
             pairs.append((logits, ti))
@@ -491,7 +679,7 @@ def calibrate(req: CalibrateReq):
     ece_ood = _ece(ood)
     accuracy = round(sum(ok for _, ok in conf_items) / len(conf_items), 4)
 
-    fingerprint = {"model": "Qwen/Qwen3.5-4B", "revision": REVISION}
+    fingerprint = {"model": MODEL_SOURCE, "revision": REVISION, "backend": BACKEND}
     entry = {
         "temperature": temperature,
         "n_fit": len(pairs),
@@ -515,7 +703,7 @@ def calibrate(req: CalibrateReq):
         with _GEN_LOCK:
             for gold, _, label in hrows:
                 validate_row(gold)
-                res = direct_module.score(model, tokenizer, gold, metadata)
+                res = _score_direct(model, tokenizer, gold, metadata)
                 logits = res["option_logits"]
                 ti = res["option_ids"].index(gold["options"][label]["id"])
                 hpairs.append((logits, ti))
@@ -533,7 +721,7 @@ def calibrate(req: CalibrateReq):
         "ece_out_of_fold": ece_ood,
         "accuracy_unchanged": accuracy,
         "fingerprint": fingerprint,
-        "status": "published + hot-reloaded (use model suffix semif-qwen3.5-4b:" + req.scenario + "); requires held-out validation",
+        "status": f"published + hot-reloaded (use model suffix {MODEL_BASE}:{req.scenario}); requires held-out validation",
         "score_seconds": score_seconds,
         "fold_temperatures": fold_temperatures,
         "heldout": heldout_metrics,
