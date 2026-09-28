@@ -51,7 +51,7 @@ One small service does the things people usually glue together:
 
 ## 🚀 Quick Start (NVIDIA GPU)
 
-🐳 **Immagine pronta all'uso** su ghcr — niente clone, niente build:
+🐳 **Ready-to-use image** on ghcr — no clone, no build:
 
 ```bash
 docker run -d --gpus all -p 8000:8000 --restart unless-stopped \
@@ -60,7 +60,7 @@ docker run -d --gpus all -p 8000:8000 --restart unless-stopped \
 curl http://localhost:8000/v1/models
 ```
 
-Oppure dal sorgente:
+Or from source:
 
 ```bash
 git clone https://github.com/andrea-tomassi/semif-server && cd semif-server
@@ -72,10 +72,9 @@ curl http://localhost:8000/v1/models
   [NVIDIA container toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
 - ⬇️ Model weights download once to the mounted HF cache on first start (~8 GB) —
   they are never baked into the image.
-- 🧪 **CPU-only / bigger quantized models**: use the `:gguf` variant below — the
-  same image runs without a GPU (point it at a GGUF, keep
-  `SEMIF_LLAMA_GPU_LAYERS=0`) and scales to full GPU offload (`-1`) on cards
-  that fit the checkpoint.
+- 🧪 **CPU-only / bigger quantized models**: use the `:gguf` variant below —
+  same image, point it at a local GGUF checkpoint. Full GPU offload is the
+  default; `SEMIF_LLAMA_GPU_LAYERS=0` for CPU-only.
 
 ### 📦 Bigger models — the GGUF variant
 
@@ -90,25 +89,14 @@ docker run -d --gpus all -p 8000:8000 --restart unless-stopped \
   ghcr.io/andrea-tomassi/semif-server:gguf
 ```
 
-At startup the image checks that the GGUF's vocabulary tokenizes exactly like
-the pinned tokenizer (a mismatch stops the server instead of serving quietly
-wrong decisions) and records the file's sha256 in every response. GPU offload
-is opt-in through the same llama.cpp semantics you already know: `0` = CPU
-only, `-1` = all layers, `N` = first N layers.
+At startup the image verifies that the checkpoint matches the pinned
+tokenizer — a mismatch stops the server instead of serving quietly wrong
+decisions. Full GPU offload is already the default; set
+`SEMIF_LLAMA_GPU_LAYERS=0` for CPU-only runs.
 
-**Long contexts on a small card** — a 150K-token context on a 16 GB GPU, with
-identical decisions to the f16 default (verified) and correct retrieval at 27K
-depth:
-
-```bash
-  -e SEMIF_MAX_TOKENS=150000 \
-  -e SEMIF_KV_TYPE_K=q8_0 -e SEMIF_KV_TYPE_V=q8_0 \
-  -e SEMIF_SWA_FULL=0
-```
-
-`SEMIF_SWA_FULL=0` switches sliding-window layers to a window-sized cache (the
-upstream full-size default makes KV memory grow with the whole context);
-`SEMIF_KV_TYPE_*` halves the remaining KV and enables flash attention.
+**Long contexts on a small card** — a 150K-token context fits on a 16 GB GPU
+with the same quality of decisions (verified, retrieval correct at 27K depth).
+The settings that make it possible are in the environment reference below.
 
 **Vision** — mount the projector and chat understands images:
 
@@ -165,28 +153,32 @@ output — no visual calibration fitted.)*
 
 ![traffic lights captcha demo](assets/vision-traffic-lights.png)
 
-**Which GPUs?** The GGUF image compiles llama.cpp's CUDA kernels for **sm_89
-(Ada / RTX 40-series)** by default — the measured-fastest build for the
-deployment it was made for. On a different architecture the service still
-starts, but the CUDA backend cannot initialise and llama.cpp falls back to CPU;
-rebuild for your GPU (one build arg, ~10–25 min):
+**Which GPUs?** The GGUF image compiles llama.cpp's CUDA kernels for
+**Turing → Blackwell in one build** (default: `75;80;86;89;90;120` + a `120`
+PTX target for forward compatibility — RTX 20/30/40/50, A100, H100 all run
+native SASS). Rebuild with a narrower list for a faster build and a smaller
+image, or extend it for other targets:
 
 ```bash
-docker build -f Dockerfile.gguf --build-arg CUDA_ARCHS=86 -t my/semif-server:gguf .
+docker build -f Dockerfile.gguf --build-arg CUDA_ARCHS="86;89" -t my/semif-server:gguf .
 ```
 
 | GPU family | `CUDA_ARCHS` |
 |---|---|
-| RTX 40 / L4 (Ada) | `89` — the default |
-| RTX 30 / A10 (Ampere) | `86` |
-| RTX 20 / T4 (Turing) | `75` |
-| A100 | `80` |
-| H100 | `90` |
-| mixed fleet | `"86;89"` (semicolon list) |
-| maximum portability | `all-major` (long build, ~+1 GB of SASS) |
+| Turing (RTX 20, T4) | `75` |
+| Ampere (RTX 30, A100) | `86` / `80` |
+| Ada (RTX 40, L4) | `89` |
+| Hopper (H100) | `90` |
+| Blackwell (RTX 50) | `120` |
+| future GPUs | `120-virtual` (PTX, JIT at load) |
 
-The `:latest` (torch) image ships PyTorch kernels for every architecture, so it
-runs on any NVIDIA GPU out of the box.
+Note: **DGX Spark (GB10) is ARM64** — it needs an `arm64` build of this image
+(same Dockerfile, built on/for that machine), not the amd64 image.
+
+About 200 MB of SASS per architecture; the default multi-arch build takes
+~40–60 min on 12 cores (cap jobs with `--build-arg BUILD_PARALLEL=8` on
+low-RAM builders). The `:latest` (torch) image ships PyTorch kernels for every
+architecture, so it runs on any NVIDIA GPU out of the box.
 
 ---
 
@@ -208,7 +200,7 @@ runs on any NVIDIA GPU out of the box.
 curl http://localhost:8000/v1/systemone -H 'Content-Type: application/json' -d '{
   "state": "Entra ID account record: displayName='"'"'Mario Rossi'"'"', userPrincipalName='"'"'m.rossi@example.com'"'"'.",
   "model": "semif-qwen3.5-4b",
-  "questions": {"tipo": {"type": "choice", "instructions": "Human or service account?",
+  "questions": {"account_type": {"type": "choice", "instructions": "Human or service account?",
     "criteria": {"human": "Real person", "service_account": "Non-human identity"}}}
 }'
 ```
