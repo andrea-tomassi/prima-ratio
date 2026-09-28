@@ -99,7 +99,22 @@ def _load_manifest():
 
 
 MANIFEST = _load_manifest()
-SCENARIOS = MANIFEST.get("scenarios", {})
+GENERIC_TEMPERATURE = float(os.environ.get("SEMIF_GENERIC_TEMPERATURE", "3.4"))
+BUILTIN_SCENARIOS = {
+    "vanilla": {
+        "temperature": 1.0, "built_in": True,
+        "description": "raw option logits, no temperature scaling",
+    },
+    "generic": {
+        "temperature": GENERIC_TEMPERATURE, "built_in": True,
+        "description": ("generic temperature fitted across mixed workloads and validated "
+                        "held-out (improves every tested workload vs raw, none worsens); "
+                        "per-workload calibration with your own labels refines it"),
+    },
+}
+
+SCENARIOS = {name: entry for name, entry in MANIFEST.get("scenarios", {}).items()
+             if name not in BUILTIN_SCENARIOS}
 
 app = FastAPI(title="semif-systemone")
 
@@ -199,6 +214,15 @@ def models():
     now = int(time.time())
     data = [{"id": MODEL_BASE, "object": "model", "created": now,
              "owned_by": "semif-server", "meta": {"variant": "raw logits (uncalibrated default)"}}]
+    for name, e in sorted(BUILTIN_SCENARIOS.items()):
+        data.append({
+            "id": f"{MODEL_BASE}:{name}",
+            "object": "model",
+            "created": now,
+            "owned_by": "semif-server",
+            "meta": {"temperature": e.get("temperature"), "built_in": True,
+                     "description": e.get("description")},
+        })
     for name, e in sorted(SCENARIOS.items()):
         data.append({
             "id": f"{MODEL_BASE}:{name}",
@@ -218,16 +242,16 @@ def models():
 @app.post("/v1/systemone")
 def systemone(req: Req):
     base, _, suffix = req.model.partition(":")
-    if suffix and suffix not in SCENARIOS:
+    if suffix and suffix not in SCENARIOS and suffix not in BUILTIN_SCENARIOS:
         raise HTTPException(
             status_code=422,
             detail={
                 "error": f"unknown scenario '{suffix}'",
-                "available": sorted(SCENARIOS),
+                "available": sorted(list(BUILTIN_SCENARIOS) + list(SCENARIOS)),
                 "hint": f'use "{MODEL_BASE}:<scenario>" — see GET /v1/models',
             },
         )
-    entry = SCENARIOS.get(suffix) if suffix else None
+    entry = (BUILTIN_SCENARIOS.get(suffix) or SCENARIOS.get(suffix)) if suffix else None
     scenario_used = suffix or None
     temperature = entry["temperature"] if entry else 1.0
 
@@ -259,8 +283,8 @@ def systemone(req: Req):
     latency_ms = round((time.perf_counter() - t0) * 1000, 1)
 
     if entry:
-        if scenario_used == "vanilla":
-            status = "raw logits (vanilla, T=1.0); uncalibrated as decision confidence"
+        if entry.get("built_in"):
+            status = f"{entry.get('description', 'built-in')} (T={round(temperature, 4)})"
         else:
             status = (
                 f"temperature scaled (T={round(temperature, 4)}, scenario '{scenario_used}', "
@@ -942,8 +966,9 @@ def calibrate(req: CalibrateReq):
     validate out-of-fold, publish into the manifest and hot-reload. No restart."""
     if not SCENARIO_RE.fullmatch(req.scenario):
         raise HTTPException(status_code=400, detail="scenario name must match [a-z0-9]+(-[a-z0-9]+)*")
-    if req.scenario == "vanilla":
-        raise HTTPException(status_code=400, detail="'vanilla' is reserved (built-in raw scenario)")
+    if req.scenario in BUILTIN_SCENARIOS:
+        raise HTTPException(status_code=400,
+                            detail=f"'{req.scenario}' is reserved (built-in scenario: {BUILTIN_SCENARIOS[req.scenario]['description']})")
     if req.scenario in SCENARIOS and not req.overwrite:
         raise HTTPException(status_code=409, detail={
             "error": f"scenario '{req.scenario}' already exists",
@@ -1071,8 +1096,9 @@ def calibrate(req: CalibrateReq):
 
 
 def _do_delete_scenario(scenario: str):
-    if scenario == "vanilla":
-        raise HTTPException(status_code=400, detail="'vanilla' is built-in (raw logits) and cannot be deleted")
+    if scenario in BUILTIN_SCENARIOS:
+        raise HTTPException(status_code=400,
+                            detail=f"'{scenario}' is built-in and cannot be deleted")
     if scenario not in SCENARIOS:
         raise HTTPException(status_code=404, detail={
             "error": f"scenario '{scenario}' not found",

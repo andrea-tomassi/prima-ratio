@@ -191,6 +191,19 @@ calibration state and is gitignored on purpose.
 > Mermaid diagram render?* — including how the labels were verified with a
 > headless-browser render oracle and the held-out numbers against Jev.
 
+### Out of the box: raw → generic → yours
+
+Three confidence levels, no setup required to get started:
+
+| Model id | Temperature | What it is |
+|---|---|---|
+| `semif-gemma4-12b` / `:vanilla` | 1.0 | raw option logits — uncalibrated, systematically overconfident |
+| **`:generic`** | **3.4** | a **generic temperature fitted across mixed workloads and validated held-out: it improves NLL *and* ECE on every tested workload, none worsens** — the sane default when you have no labels yet |
+| `:your-scenario` | fitted | calibrated on **your** labeled examples (30–60 are plenty) — refines the generic default on your workload |
+
+The generic value is model-bound (refit if the base model changes) and tunable
+via `SEMIF_GENERIC_TEMPERATURE`.
+
 ### ⚠️ Three honest caveats
 
 - 🎚️ Calibration adjusts **confidence**, not accuracy — if the model gets the
@@ -273,6 +286,7 @@ any external exposure.
 | `SEMIF_KV_TYPE_K` / `SEMIF_KV_TYPE_V` | `f16` | KV cache type — `q8_0` halves KV memory and enables flash attention |
 | `SEMIF_SWA_FULL` | `1` | `0` = window-sized SWA cache: sliding-window layers stop scaling with the context (needed for 100K+ on consumer GPUs) |
 | `SEMIF_PARALLEL` | `1` | chat/vision generation slots — like llama.cpp `--parallel`: N requests run concurrently, each getting total ÷ N context |
+| `SEMIF_GENERIC_TEMPERATURE` | `3.4` | built-in `:generic` scenario temperature (fitted across mixed workloads, validated held-out) |
 | `SEMIF_CHAT_TOKENS` | `180000` | TOTAL chat/vision context, split across the slots (`total ÷ SEMIF_PARALLEL` per slot, llama.cpp `-c` semantics); requests above the per-slot share are refused with 400 (0 = unlimited) |
 | `SEMIF_MODEL_NAME` | `semif-gemma4-12b` | model-id base for variants |
 | `SEMIF_MANIFEST` | `build/calibration-manifest.json` | calibration state file (mount it, back it up) |

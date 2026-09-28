@@ -146,6 +146,29 @@ is unpublished, so ECE is reported as standard top-label ECE.
 Harness: `benchmarks/typed_decisions_bench.py` (replays the parquet test split
 against any System One endpoint, captures per-case latency).
 
+## 5. Generic temperature — cross-workload validation
+
+The claim for the built-in `:generic` variant: a **single temperature fitted on
+some workloads, applied to a different one, never gets worse than raw**. Setup:
+NLL/ECE computed on four workloads (decisions only; temperature preserves every
+argmax); fit on one, evaluate on the rest.
+
+| Fitted on (T) | `mermaid-fit60` | `mermaid-eval100` | `typed-decisions` | `authored144` |
+|---|---|---|---|---|
+| `authored144` (2.7) | **−15.9 %** NLL, −0.101 ECE | **−42.2 %**, −0.107 | **−30.3 %**, −0.078 | (fit) |
+| `mermaid-fit60` (4.0) | (fit) | −43.3 %, −0.101 | −34.1 %, −0.135 | −4.4 %, −0.019 |
+| **shipped mix** (`authored144`+`mermaid-fit60`) → **T = 3.4** | (fit) | **−43.5 %**, −0.113 | **−32.9 %**, −0.111 | (fit) |
+| `typed-decisions` (6.7, *sanity*) | −16.0 %, −0.146 | −38.8 %, −0.042 | (fit) | −2.7 %, −0.009 |
+
+Every held-out cell improves **both** NLL and ECE — even fitting on a
+completely different domain (`typed-decisions` → `mermaid` −39 %). That is why
+`:generic` can ship as a default: it is not optimal per workload (per-workload
+calibration still wins by up to ~20 % NLL), but it is **never worse than
+uncalibrated**.
+
+Shipped value: **T = 3.4** (`SEMIF_GENERIC_TEMPERATURE`), fitted on the
+mixed-workload fit set and validated on the held-out workloads above.
+
 ---
 
 ## Operations (same deployment)
