@@ -4,13 +4,16 @@ A local, single-GPU **System One + Chat Completion endpoint** in a single
 package: the [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) engine ships
 inside the Docker image (pull, run, done) with **one stock model in VRAM**
 serving **typed decisions with probabilities** (yes/no, multiple-choice, scores
-read directly from option logits) **and normal chat completions**.
+read directly from option logits), **image-conditioned decisions** (the same
+readout, pointed at a photo — no caption step), **and normal chat
+completions**.
 
 Built on [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) (direct option-logit
 readout, MIT). Two image variants, same API: **`:latest`** serves
 `Qwen/Qwen3.5-4B` bf16 through transformers; **`:gguf`** serves any local
-`.gguf` checkpoint through llama.cpp with opt-in full GPU offload (this is how
-a 12B Q6_K_XL runs smoothly on a 16 GB card).
+`.gguf` checkpoint through llama.cpp with opt-in full GPU offload and vision
+projector support (this is how a 12B Q6_K_XL with image understanding runs
+smoothly on a 16 GB card).
 API-compatible with TypeSafe's System One / Jev pattern.
 
 Independent project; not affiliated with TypeSafe, Jev, SemIf or Qwen.
@@ -21,12 +24,17 @@ Independent project; not affiliated with TypeSafe, Jev, SemIf or Qwen.
 
 ## 🎯 Why it's comfortable
 
-One small service does three things people usually glue together:
+One small service does the things people usually glue together:
 
 - ⚡ **Typed decisions instead of prompts.** You describe the state and the
   question; the answer is a choice with probabilities — no answer sentence to
   parse, no JSON repair, no retry loops. The model never generates tokens:
   scoring one decision takes about a tenth of a second.
+- 👁️ **Decisions from images.** Mount the vision projector and the same
+  option-logit readout works on photos: send an image, ask one or more
+  questions, get typed answers with probabilities — **no captioning step in
+  between**. Nine CAPTCHA squares in one request, 2.2 s — and visual workloads
+  calibrate like any other.
 - 🎚️ **Your own confidence.** Feed it a few dozen labeled examples and it
   re-calibrates its probabilities on your workload. Confidence you can put a
   threshold on, with honest out-of-fold numbers to back it.
