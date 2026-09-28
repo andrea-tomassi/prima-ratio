@@ -26,7 +26,9 @@ ENV UV_COMPILE_BYTECODE=1 \
 # and Blackwell natively (RTX 20/30/40/50, A100, H100) plus a 120 PTX target
 # for forward compatibility. Narrow it for a faster build / smaller image.
 ARG CUDA_ARCHS="75;80;86;89;90;120;120-virtual"
-ENV CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS}"
+# GGML_NATIVE=off: CI runners may carry newer instruction sets (e.g. AVX-512) that
+# consumer hosts lack — a "native" build crashes with SIGILL there. Build portable.
+ENV CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS} -DGGML_NATIVE=off"
 # nvcc is memory-hungry: cap parallel compile jobs on low-RAM builders
 ARG BUILD_PARALLEL=8
 ENV CMAKE_BUILD_PARALLEL_LEVEL=${BUILD_PARALLEL}
