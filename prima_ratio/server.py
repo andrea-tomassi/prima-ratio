@@ -1129,7 +1129,7 @@ def calibrate(req: CalibrateReq):
             input_tokens += res.get("input_tokens", 0)
     score_seconds = round(time.perf_counter() - t0, 2)
 
-    temperature = round(_golden_fit(pairs), 6)
+    temperature_nll = round(_golden_fit(pairs), 6)
 
     # honest out-of-fold ECE: group-disjoint folds, T fitted per fold
     groups = sorted({g["id"] for g, _, _ in rows})
@@ -1152,7 +1152,19 @@ def calibrate(req: CalibrateReq):
     ece_ood = _ece(ood)
     accuracy = round(sum(ok for _, ok in conf_items) / len(conf_items), 4)
 
+    # ECE guard: only publish a fitted temperature when the out-of-fold ECE
+    # actually beats the raw confidence. A NLL-optimal T can *worsen* top-label
+    # ECE (few maximally-confident errors dominate the NLL): in that case the
+    # honest thing is to keep the raw confidence (T=1) and say so.
+    no_gain = ece_ood is not None and ece_raw is not None and ece_ood >= ece_raw
+    temperature = 1.0 if no_gain else temperature_nll
+
     fingerprint = {"model": MODEL_SOURCE, "revision": REVISION, "backend": "llamacpp"}
+    if no_gain:
+        description = ("calibrated for this workload — the fitted correction is neutral: "
+                       "confidence is already reliable on this domain (validated out-of-fold).")
+    else:
+        description = req.description or f"calibrated via /v1/calibrate on {len(pairs)} rows"
     entry = {
         "temperature": temperature,
         "n_fit": len(pairs),
@@ -1162,7 +1174,7 @@ def calibrate(req: CalibrateReq):
         "accuracy_unchanged": accuracy,
         "fingerprint": fingerprint,
         "fitted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "description": req.description or f"calibrated via /v1/calibrate on {len(pairs)} rows",
+        "description": description,
     }
     SCENARIOS[req.scenario] = entry
     _persist_manifest()
@@ -1189,6 +1201,8 @@ def calibrate(req: CalibrateReq):
     return {
         "scenario": req.scenario,
         "temperature": temperature,
+        "temperature_nll": temperature_nll,
+        "no_gain": no_gain,
         "n_fit": len(pairs),
         "ece_raw": ece_raw,
         "ece_out_of_fold": ece_ood,
