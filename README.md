@@ -16,9 +16,9 @@ local GGUF file with full GPU offload and vision projector support (this is how
 a 12B Q6_K_XL with image understanding runs smoothly on a 16 GB card).
 API-compatible with TypeSafe's System One / Jev pattern.
 
-Independent project; not affiliated with TypeSafe, Jev, SemIf or Qwen.
+Independent project; not affiliated with TypeSafe, Jev or SemIf.
 
-![license](https://img.shields.io/badge/license-MIT-0a0a0a) ![GPU](https://img.shields.io/badge/NVIDIA-≥12GB_VRAM-76b900) ![API](https://img.shields.io/badge/API-System_One_/_OpenAI-0a0a0a)
+![license](https://img.shields.io/badge/license-MIT-0a0a0a) ![GPU](https://img.shields.io/badge/NVIDIA-≥16GB_VRAM-76b900) ![API](https://img.shields.io/badge/API-System_One_/_OpenAI-0a0a0a)
 
 ---
 
@@ -42,7 +42,7 @@ One small service does the things people usually glue together:
   **model variant**: same API, same server, just a different name after a
   colon. Creating or deleting one is a single HTTP call — no restart, no
   rebuild, no machine-learning expertise required.
-- 🎁 **Two APIs, one VRAM footprint.** The ~8 GB that host the decision engine
+- 🎁 **Two APIs, one VRAM footprint.** The 16 GB that host the decision engine
   also serve a full OpenAI-shaped **chat completions** endpoint — same model,
   same process, zero extra memory. Decisions for your pipelines, a
   conversational fallback for everything else, in one deployment.
@@ -251,7 +251,6 @@ any external exposure.
 - [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) (MIT) — the direct-logit
   scoring method, shared-mode execution and calibration tooling
 - [gemma-4-12b-it](https://huggingface.co/unsloth/gemma-4-12b-it) (Gemma Terms of Use) — the model served by the image
-- [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) (Apache-2.0) — legacy torch builds
 - [TypeSafe](https://docs.typesafe.ai/api) — the System One API pattern
 
 ---
