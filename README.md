@@ -205,6 +205,23 @@ calibration state and is gitignored on purpose.
 
 ---
 
+## 📊 Benchmarks at a glance
+
+| Fixture | Metric | SemIf 4B | SemIf 27B exl3 | **Gemma4-12B** *(this repo)* | Jev |
+|---|---|---|---|---|---|
+| `authored144` — 144 labeled rows | family-balanced accuracy | 0.813 | **0.958** | **0.938** | — |
+| `shape777` — 777 decisions | agreement vs 4B majority | 0.991\* | 0.844 | **0.839** | — |
+| `typesafe_public_102` — 102 public cases | modal agreement | 0.845 | — | **0.898** | 0.883 |
+| `typesafe_public_102` — 102 public cases | TV distance | 0.177 | — | 0.140 | **0.127** |
+
+\* the pinned 4B *is* the baseline — 0.991 is its own run-to-run consistency.
+
+777 decisions in **2.4 min** batched (37 requests × 21 questions, prefix reuse) ·
+decisions at **127–144 ms** · full protocol, caveats and reproduction commands:
+**[BENCHMARKS.md](BENCHMARKS.md)**.
+
+---
+
 ## 📦 Releases & Docker image
 
 Prebuilt images on ghcr (public):
@@ -223,6 +240,7 @@ docker pull ghcr.io/andrea-tomassi/semif-server:gguf
 | `v0.1.0` | first release — System One + chat + automated calibration |
 
 Notes and changelogs: [Releases](https://github.com/andrea-tomassi/semif-server/releases).
+Benchmark comparisons (SemIf 4B / 27B exl3 / Jev): [BENCHMARKS.md](BENCHMARKS.md).
 
 ---
 
