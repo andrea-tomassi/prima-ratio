@@ -726,8 +726,8 @@ def _check_chat_budget(prompt_tokens: int, max_tokens: int) -> int:
     """Refuse requests above the per-slot share of PRIMA_CHAT_TOKENS (no truncation).
 
     llama.cpp semantics: PRIMA_CHAT_TOKENS is the TOTAL context and each of the
-    PRIMA_PARALLEL slots gets total / parallel (e.g. 180000 with parallel=2 ->
-    90000 per slot).
+    PRIMA_PARALLEL slots gets total / parallel (e.g. 200000 with parallel=2 ->
+    100000 per slot).
     """
     need_tokens = prompt_tokens + max_tokens + 8
     if CHAT_SLOT_TOKENS and need_tokens > CHAT_SLOT_TOKENS:
