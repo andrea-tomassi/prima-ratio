@@ -1,11 +1,15 @@
 # 🌳 semif-server
 
-**Text + images in. Text + typed decisions out.**
+**Text or images in. Text or typed decisions out.**
 
-A multimodal **System One** on a single GPU: point it at a message, a record,
-or a photo, ask your questions, and read the answers as **typed decisions with
-probabilities** — scored straight off the model's logits. No generation, no
-parsing, no captioning. Confidence you can classify, verify and gate on.
+Both a calibrated **System One** — like Jev, running locally with no external
+APIs — and a very capable 12B chat model with tool-calling support, in a
+single 16 GB VRAM package.
+
+Point it at a message, a record, or a photo, ask your questions, and read the
+answers as **typed decisions with probabilities**, scored straight off the
+model's logits — no generation, no parsing, no captioning. Confidence you can
+classify, verify and gate on.
 
 It ships as **one Docker image, one model in VRAM**: the
 [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) engine (direct option-logit
@@ -218,6 +222,13 @@ docker pull ghcr.io/andrea-tomassi/semif-server:gguf
 | `v0.1.0` | first release — System One + chat + automated calibration |
 
 Notes and changelogs: [Releases](https://github.com/andrea-tomassi/semif-server/releases).
+
+---
+
+## 🗺️ Roadmap
+
+- **12B on a 12 GB card** — a Docker container for the 12B model in **Q4 QAT**
+  quantizations, with optional vision support, targeting 12 GB VRAM.
 
 ---
 
