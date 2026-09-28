@@ -1,19 +1,18 @@
 # 🌳 semif-server
 
-A local, single-GPU **System One + Chat Completion endpoint** in a single
-package: the [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) engine ships
-inside the Docker image (pull, run, done) with **one stock model in VRAM**
-serving **typed decisions with probabilities** (yes/no, multiple-choice, scores
-read directly from option logits), **image-conditioned decisions** (the same
-readout, pointed at a photo — no caption step), **and normal chat
-completions**.
+**Images in, typed decisions out.** A local, single-GPU **System One + Chat
+Completion endpoint** in a single package: the
+[SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) engine ships inside the
+Docker image (pull, run, done) with **one stock model in VRAM** serving
+**image-conditioned decisions** (option logits read straight off the model —
+no caption step in between), **typed text decisions** (yes/no, multiple-choice,
+scores) and **normal chat completions**.
 
 Built on [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) (direct option-logit
-readout, MIT). Two image variants, same API: **`:latest`** serves
-`Qwen/Qwen3.5-4B` bf16 through transformers; **`:gguf`** serves any local
-`.gguf` checkpoint through llama.cpp with opt-in full GPU offload and vision
-projector support (this is how a 12B Q6_K_XL with image understanding runs
-smoothly on a 16 GB card).
+readout, MIT). Two image variants, same API: **`:latest`** (transformers, bf16)
+and **`:gguf`** (llama.cpp on a local GGUF file — full GPU offload and vision
+projector support included; this is how a 12B Q6_K_XL with image understanding
+runs smoothly on a 16 GB card).
 API-compatible with TypeSafe's System One / Jev pattern.
 
 Independent project; not affiliated with TypeSafe, Jev, SemIf or Qwen.
@@ -26,15 +25,15 @@ Independent project; not affiliated with TypeSafe, Jev, SemIf or Qwen.
 
 One small service does the things people usually glue together:
 
-- ⚡ **Typed decisions instead of prompts.** You describe the state and the
-  question; the answer is a choice with probabilities — no answer sentence to
-  parse, no JSON repair, no retry loops. The model never generates tokens:
-  scoring one decision takes about a tenth of a second.
 - 👁️ **Decisions from images.** Mount the vision projector and the same
   option-logit readout works on photos: send an image, ask one or more
   questions, get typed answers with probabilities — **no captioning step in
   between**. Nine CAPTCHA squares in one request, 2.2 s — and visual workloads
   calibrate like any other.
+- ⚡ **Typed decisions instead of prompts.** You describe the state and the
+  question; the answer is a choice with probabilities — no answer sentence to
+  parse, no JSON repair, no retry loops. The model never generates tokens:
+  scoring one decision takes about a tenth of a second.
 - 🎚️ **Your own confidence.** Feed it a few dozen labeled examples and it
   re-calibrates its probabilities on your workload. Confidence you can put a
   threshold on, with honest out-of-fold numbers to back it.
@@ -60,78 +59,16 @@ docker run -d --gpus all -p 8000:8000 --restart unless-stopped \
 curl http://localhost:8000/v1/models
 ```
 
-Or from source:
-
-```bash
-git clone https://github.com/andrea-tomassi/semif-server && cd semif-server
-docker compose up -d          # builds and binds :8000
-curl http://localhost:8000/v1/models
-```
-
 - ✅ **Requires an NVIDIA GPU** (≥ 8 GB VRAM for the 4B bf16 model) and the
   [NVIDIA container toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
 - ⬇️ Model weights download once to the mounted HF cache on first start (~8 GB) —
   they are never baked into the image.
-- 🧪 **CPU-only / bigger quantized models**: use the `:gguf` variant below —
-  same image, point it at a local GGUF checkpoint. Full GPU offload is the
-  default; `SEMIF_LLAMA_GPU_LAYERS=0` for CPU-only.
+- 🧭 **Other ways to run it** — GGUF variant, vision projector, long contexts,
+  from source, custom CUDA builds: **[RUNNING.md](RUNNING.md)**.
 
-### 📦 Bigger models — the GGUF variant
+---
 
-Same endpoints, same calibration flow; llama.cpp does the forward pass on a
-local GGUF checkpoint (scoring **and** chat share the loaded weights):
-
-```bash
-docker run -d --gpus all -p 8000:8000 --restart unless-stopped \
-  -v ~/.cache/huggingface:/cache/huggingface \
-  -v /path/to/models:/models:ro \
-  -e SEMIF_GGUF=/models/your-model.gguf \
-  ghcr.io/andrea-tomassi/semif-server:gguf
-```
-
-At startup the image verifies that the checkpoint matches the pinned
-tokenizer — a mismatch stops the server instead of serving quietly wrong
-decisions. Full GPU offload is already the default; set
-`SEMIF_LLAMA_GPU_LAYERS=0` for CPU-only runs.
-
-**Long contexts on a small card** — a 150K-token context fits on a 16 GB GPU
-with the same quality of decisions (verified, retrieval correct at 27K depth).
-The settings that make it possible are in the environment reference below.
-
-**Vision** — mount the projector and chat understands images:
-
-```bash
-  -v /path/to/models:/models:ro \
-  -e SEMIF_MMPROJ=/models/mmproj-F16.gguf
-```
-
-Then send OpenAI-style content parts with base64 data URLs:
-
-```json
-{"messages": [{"role": "user", "content": [
-  {"type": "text", "text": "What does the image say?"},
-  {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}]}]}
-```
-
-`GET /v1/models` reports `"vision": true` on the chat entry when the projector
-is loaded.
-
-The same images work in **decisions** (GGUF backend only): give `state` as
-content parts and the option logits are read **conditioned on the image** — no
-caption step in between:
-
-```json
-{"state": [{"type": "text", "text": "Inspect the receipt."},
-           {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}],
- "model": "semif-gemma4-12b",
- "questions": {"over": {"type": "choice", "instructions": "Is the total over 100?",
-                          "criteria": {"yes": "over 100", "no": "not over 100"}}}}
-```
-
-Multiple questions in one request share the image. Calibration works the same
-way: labeled rows with image states fit a temperature for the visual workload.
-
-#### 👁️ Demo — nine questions, one image, one request
+## 👁️ Demo — nine questions, one image, one request
 
 A reCAPTCHA-style challenge (*select all images with traffic lights*), nine
 labeled squares, all nine questions in a single request — the image is encoded
@@ -152,33 +89,6 @@ exactly where a person squints, rock-solid on clean negatives. *(Raw model
 output — no visual calibration fitted.)*
 
 ![traffic lights captcha demo](assets/vision-traffic-lights.png)
-
-**Which GPUs?** The GGUF image compiles llama.cpp's CUDA kernels for
-**Turing → Blackwell in one build** (default: `75;80;86;89;90;120` + a `120`
-PTX target for forward compatibility — RTX 20/30/40/50, A100, H100 all run
-native SASS). Rebuild with a narrower list for a faster build and a smaller
-image, or extend it for other targets:
-
-```bash
-docker build -f Dockerfile.gguf --build-arg CUDA_ARCHS="86;89" -t my/semif-server:gguf .
-```
-
-| GPU family | `CUDA_ARCHS` |
-|---|---|
-| Turing (RTX 20, T4) | `75` |
-| Ampere (RTX 30, A100) | `86` / `80` |
-| Ada (RTX 40, L4) | `89` |
-| Hopper (H100) | `90` |
-| Blackwell (RTX 50) | `120` |
-| future GPUs | `120-virtual` (PTX, JIT at load) |
-
-Note: **DGX Spark (GB10) is ARM64** — it needs an `arm64` build of this image
-(same Dockerfile, built on/for that machine), not the amd64 image.
-
-About 200 MB of SASS per architecture; the default multi-arch build takes
-~40–60 min on 12 cores (cap jobs with `--build-arg BUILD_PARALLEL=8` on
-low-RAM builders). The `:latest` (torch) image ships PyTorch kernels for every
-architecture, so it runs on any NVIDIA GPU out of the box.
 
 ---
 
@@ -249,8 +159,7 @@ calibration state and is gitignored on purpose.
 > 📐 **Worked example**: [`calibration/examples/mermaid-syntax/`](calibration/examples/mermaid-syntax/)
 > runs the full flow on a task with verifiable ground truth — *will this
 > Mermaid diagram render?* — including how the labels were verified with a
-> headless-browser render oracle and the held-out numbers against a frontier
-> SaaS baseline.
+> headless-browser render oracle and the held-out numbers against Jev.
 
 ### ⚠️ Three honest caveats
 
@@ -276,8 +185,8 @@ docker pull ghcr.io/andrea-tomassi/semif-server:latest
 
 | Tag | Content |
 |---|---|
-| `latest` | latest stable build — torch backend, Qwen3.5-4B bf16 |
-| `gguf` | llama.cpp backend — any local `.gguf`, opt-in full GPU offload |
+| `latest` | latest stable build — torch backend (bf16) |
+| `gguf` | llama.cpp backend — the model as a local GGUF file, full GPU offload, vision |
 | `v0.2.1` | vision (chat + image-conditioned decisions) + 150K long context ([release notes](https://github.com/andrea-tomassi/semif-server/releases/tag/v0.2.1)) |
 | `v0.2.0` | GGUF variant + worked calibration example ([release notes](https://github.com/andrea-tomassi/semif-server/releases/tag/v0.2.0)) |
 | `v0.1.0` | first release — System One + chat + automated calibration |
@@ -303,9 +212,7 @@ any external exposure.
 | `SEMIF_LLAMA_GPU_LAYERS` | `0` / `-1` | llama.cpp offload: `0` CPU, `-1` all layers, `N` first N |
 | `SEMIF_KV_TYPE_K` / `SEMIF_KV_TYPE_V` | `f16` | KV cache type — `q8_0` halves KV memory and enables flash attention |
 | `SEMIF_SWA_FULL` | `1` | `0` = window-sized SWA cache: sliding-window layers stop scaling with the context (needed for 100K+ on consumer GPUs) |
-| `SEMIF_MODEL` | `Qwen/Qwen3.5-4B` / `unsloth/gemma-4-12b-it` | HF tokenizer source (template + provenance) |
-| `SEMIF_REVISION` | pinned per model | revision recorded in variant fingerprints |
-| `SEMIF_MODEL_NAME` | `semif-qwen3.5-4b` / `semif-gemma4-12b` | public model-id base for variants |
+| `SEMIF_MODEL_NAME` | `semif-qwen3.5-4b` / `semif-gemma4-12b` | model-id base for variants |
 | `SEMIF_MANIFEST` | `build/calibration-manifest.json` | calibration state file (mount it, back it up) |
 | `SEMIF_MAX_TOKENS` | `4096` | scoring context budget (no truncation — rows that don't fit are refused) |
 
@@ -315,7 +222,8 @@ any external exposure.
 
 - [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) (MIT) — the direct-logit
   scoring method, shared-mode execution and calibration tooling
-- [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) (Apache-2.0) — the served model
+- [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) (Apache-2.0) — served by the `:latest` image
+- [gemma-4-12b-it](https://huggingface.co/unsloth/gemma-4-12b-it) (Gemma Terms of Use) — served by the `:gguf` image
 - [TypeSafe](https://docs.typesafe.ai/api) — the System One API pattern
 
 ---
