@@ -7,9 +7,9 @@ APIs — and a very capable chat model with tool-calling support, in a single
 16 GB VRAM package.
 
 Point it at a message, a record, or a photo, ask your questions, and read the
-answers as **typed decisions with probabilities**, scored straight off the
-model's logits — no generation, no parsing, no captioning. Confidence you can
-classify, verify and gate on.
+answers as **typed decisions with probabilities**, straight off the model —
+no generation, no parsing, no captioning. Confidence you can classify, verify
+and gate on.
 
 It ships as **one Docker image, one engine in VRAM**: pull, run, done — the
 image sets itself up on first start, serving **image-conditioned decisions**,
@@ -104,8 +104,8 @@ chat and decisions both understand it:
                           "criteria": {"yes": "over 100", "no": "not over 100"}}}}
 ```
 
-The option logits are read **conditioned on the image** — no caption step in
-between. Chat content parts, multiple questions per image and visual-workload
+The answer is read **directly off the image** — no caption step in between.
+Chat content parts, multiple questions per image and visual-workload
 calibration: [RUNNING.md](RUNNING.md).
 
 ---
@@ -176,33 +176,30 @@ calibration state and is gitignored on purpose.
 
 > 📐 **Worked example**: [`calibration/examples/mermaid-syntax/`](calibration/examples/mermaid-syntax/)
 > runs the full flow on a task with verifiable ground truth — *will this
-> Mermaid diagram render?* — including how the labels were verified with a
-> headless-browser render oracle and the held-out numbers against Jev.
+> Mermaid diagram render?* — including held-out numbers against Jev.
 
 ### Out of the box: calibrated → yours → uncalibrated (if you insist)
 
 Three confidence levels, no setup required to get started:
 
-| Model id | Temperature | What it is |
-|---|---|---|
-| **`:calibrated`** | **3.4** | the built-in default for decisions: **one temperature fitted across mixed workloads and validated held-out — it improves NLL *and* ECE on every tested workload, none worsens** |
-| `:your-scenario` | fitted | calibrated on **your** labeled examples (30–60 are plenty) — refines the built-in on your workload |
-| `:uncalibrated` | 1.0 | raw option logits — systematically overconfident, **not recommended for decisions** |
+| Model id | What it is |
+|---|---|
+| **`:calibrated`** | **the default for decisions** — the built-in fit, validated across mixed workloads: confidence quality improves on every workload we tested, none worsens |
+| `:your-scenario` | calibrated on **your** labeled examples (30–60 are plenty) — refines the built-in on your workload |
+| `:uncalibrated` | raw scores — systematically overconfident, **not recommended for decisions** |
 
-The built-in value is model-bound (refit if the base model changes) and tunable
-via `PRIMA_CALIBRATED_TEMPERATURE`.
+The built-in fit belongs to the shipped engine version — after an upgrade,
+re-fit or use your own scenario.
 
 ### ⚠️ Three honest caveats
 
 - 🎚️ Calibration adjusts **confidence**, not accuracy — if the model gets the
-  answer wrong, no temperature will fix it (that's a job for fine-tuning the
-  base model).
-- 🔖 A variant is valid for the **exact model revision** it was fitted on —
-  after an upgrade, re-calibrate: your labeled examples are the whole cost of
-  that.
-- 🔎 Scores are **conditional on the exact weights shipped** (their sha256 is
-  recorded in every response); expect small numeric differences across builds,
-  not different behaviour.
+  answer wrong, no calibration will fix it (that's a job for training, not
+  tuning).
+- 🔖 A variant belongs to the **exact engine version** it was fitted on — after
+  an upgrade, re-calibrate: your labeled examples are the whole cost of that.
+- 🔎 Scores are tied to the shipped engine build: expect tiny numeric
+  differences across versions, never different behaviour.
 
 ---
 
@@ -215,11 +212,10 @@ via `PRIMA_CALIBRATED_TEMPERATURE`.
 | `typesafe_public_102` — 102 public cases | modal agreement | 0.845 | — | **0.898** | 0.883 |
 | `typesafe_public_102` — 102 public cases | TV distance | 0.177 | — | 0.140 | **0.127** |
 | `typed-decisions` — 400 public cases | accuracy (zero-shot) | — | — | **0.702** | 0.727 |
-| `typed-decisions` — 400 public cases | ECE after one global temperature | — | — | **0.089** | 0.144 |
+| `typed-decisions` — 400 public cases | confidence error after calibration | — | — | **0.089** | 0.144 |
 
 \* the pinned 4B *is* the baseline — 0.991 is its own run-to-run consistency.
-Jev rows measured **live** via its public endpoint (358–380 ms/call, ~$0.00002–0.00017)
-reproducing its published outputs **102/102** before comparison.
+Jev measured **live** through its public endpoint, reproducing its published outputs **102/102** before comparison.
 
 777 decisions in **2.4 min** batched (37 requests × 21 questions, prefix reuse) ·
 local decisions at **127–144 ms** · full protocol, caveats and reproduction:
@@ -240,9 +236,9 @@ docker pull ghcr.io/andrea-tomassi/prima-ratio:latest
 | **`latest`** | **the single image** — decisions + chat + vision, full GPU offload |
 | `v0.3.0` | **prima-ratio**: single image, single engine; renamed built-ins (`:calibrated` / `:uncalibrated`) |
 | pre-0.3.0 | historical builds under the old distribution model |
-| `v0.2.2` | multi-arch CUDA (Turing → Blackwell) + chat context pool ([release notes](https://github.com/andrea-tomassi/prima-ratio/releases/tag/v0.2.2)) |
-| `v0.2.1` | vision (chat + image-conditioned decisions) + 150K long context ([release notes](https://github.com/andrea-tomassi/prima-ratio/releases/tag/v0.2.1)) |
-| `v0.2.0` | first local-model distribution + worked calibration example ([release notes](https://github.com/andrea-tomassi/prima-ratio/releases/tag/v0.2.0)) |
+| `v0.2.2` | GPU support for Turing → Blackwell generations + concurrent chat ([release notes](https://github.com/andrea-tomassi/prima-ratio/releases/tag/v0.2.2)) |
+| `v0.2.1` | vision + long context ([release notes](https://github.com/andrea-tomassi/prima-ratio/releases/tag/v0.2.1)) |
+| `v0.2.0` | first local-engine distribution + calibration example ([release notes](https://github.com/andrea-tomassi/prima-ratio/releases/tag/v0.2.0)) |
 | `v0.1.0` | first release — System One + chat + automated calibration |
 
 Notes and changelogs: [Releases](https://github.com/andrea-tomassi/prima-ratio/releases).
@@ -263,24 +259,6 @@ Benchmark comparisons (SemIf 4B / 27B exl3 / Jev): [BENCHMARKS.md](BENCHMARKS.md
 
 🔒 LAN-only by default — put the service behind a reverse proxy with auth for
 any external exposure.
-
----
-
-## ⚙️ Environment reference
-
-The essentials — context sizes, cache types and slot tuning live in
-[RUNNING.md](RUNNING.md).
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `PRIMA_ENGINE` | `12B_VISION` | engine to serve (12B, 4B, 4B_VISION: roadmap) |
-| `PRIMA_CACHE` | `/cache` | engine + tokenizer cache folder — mount it to persist |
-| `PRIMA_GGUF` / `PRIMA_MMPROJ` | — | explicit asset paths (override the engine) |
-| `PRIMA_MAX_TOKENS` | `4096` | scoring context budget |
-| `PRIMA_CHAT_TOKENS` | `200000` | total chat/vision context, split across slots |
-| `PRIMA_PARALLEL` | `1` | concurrent chat/vision generation slots |
-| `PRIMA_CALIBRATED_TEMPERATURE` | `3.4` | built-in `:calibrated` temperature |
-| `PRIMA_MANIFEST` | `build/calibration-manifest.json` | calibration state file (mount it, back it up) |
 
 ---
 

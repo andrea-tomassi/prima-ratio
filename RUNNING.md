@@ -122,6 +122,19 @@ low-RAM builders).
 
 ## ⚙️ Configuration
 
-All environment variables — including the projector, KV cache types and
-long-context knobs used above — are listed in the environment reference of the
-[README](README.md).
+Everything has sane defaults — this is the full reference for tuning:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PRIMA_ENGINE` | `12B_VISION` | engine to serve (12B, 4B, 4B_VISION: roadmap) |
+| `PRIMA_CACHE` | `/cache` | engine + tokenizer cache folder — mount it to persist |
+| `PRIMA_GGUF` / `PRIMA_MMPROJ` | — | explicit asset paths (override the engine) |
+| `PRIMA_MAX_TOKENS` | `4096` | scoring context budget |
+| `PRIMA_CHAT_TOKENS` | `200000` | total chat/vision context, split across slots |
+| `PRIMA_PARALLEL` | `1` | concurrent chat/vision generation slots |
+| `PRIMA_KV_TYPE_K` / `PRIMA_KV_TYPE_V` | `f16` | KV cache type — `q8_0` halves KV memory |
+| `PRIMA_SWA_FULL` | `1` | `0` = window-sized cache, for 100K+ contexts on consumer GPUs |
+| `PRIMA_LLAMA_GPU_LAYERS` | `-1` | GPU offload: `0` CPU, `-1` all layers |
+| `PRIMA_CALIBRATED_TEMPERATURE` | `3.4` | built-in `:calibrated` fit |
+| `PRIMA_MODEL_NAME` | `prima-ratio-gemma4-12b` | model-id base for variants |
+| `PRIMA_MANIFEST` | `build/calibration-manifest.json` | calibration state file (mount it, back it up) |
