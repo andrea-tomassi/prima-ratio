@@ -335,6 +335,8 @@ class ChatReq(BaseModel):
     top_p: float = 0.8
     max_tokens: int = 512
     thinking: bool = True
+    tools: list[dict] | None = None
+    tool_choice: str | None = None
 
 
 # --- GGUF chat: a pool of generation contexts (model weights shared) ---
@@ -512,6 +514,96 @@ def _gguf_split_images(messages: list[dict]):
 
 
 _STOP_MARKERS = ("<turn|>", "<end_of_turn>", "<eos>", "</s>")
+
+_TOOL_CALL_RE = re.compile(r"<\|tool_call>(.*?)<tool_call\|>", re.DOTALL)
+_QUOTE_TOKEN = '<|"|>'
+
+
+def _split_gemma_items(body: str) -> list[str]:
+    """Split a gemma-rendered argument body on top-level commas."""
+    items, current, depth, in_string = [], [], 0, False
+    i = 0
+    while i < len(body):
+        if body.startswith(_QUOTE_TOKEN, i):
+            in_string = not in_string
+            current.append(_QUOTE_TOKEN)
+            i += len(_QUOTE_TOKEN)
+            continue
+        char = body[i]
+        if not in_string:
+            if char in "{[":
+                depth += 1
+            elif char in "}]":
+                depth -= 1
+            elif char == "," and depth == 0:
+                items.append("".join(current))
+                current = []
+                i += 1
+                continue
+        current.append(char)
+        i += 1
+    if current:
+        items.append("".join(current))
+    return [item.strip() for item in items if item.strip()]
+
+
+def _parse_gemma_scalar(raw: str):
+    raw = raw.strip()
+    if raw.startswith(_QUOTE_TOKEN) and raw.endswith(_QUOTE_TOKEN) and len(raw) >= 2 * len(_QUOTE_TOKEN):
+        return raw[len(_QUOTE_TOKEN):-len(_QUOTE_TOKEN)]
+    if raw.startswith("{") and raw.endswith("}"):
+        return _parse_gemma_pairs(raw[1:-1])
+    if raw.startswith("[") and raw.endswith("]"):
+        return [_parse_gemma_scalar(item) for item in _split_gemma_items(raw[1:-1])]
+    lowered = raw.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if lowered in {"null", "none"}:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        pass
+    try:
+        return float(raw)
+    except ValueError:
+        pass
+    return raw
+
+
+def _parse_gemma_pairs(body: str) -> dict:
+    pairs = {}
+    for item in _split_gemma_items(body):
+        key, sep, value = item.partition(":")
+        if not sep:
+            continue
+        pairs[key.strip()] = _parse_gemma_scalar(value)
+    return pairs
+
+
+def _parse_tool_calls(text: str) -> tuple[str, list[dict]]:
+    """Extract native gemma tool calls; returns (text before the first call, calls)."""
+    calls, first = [], None
+    for match in _TOOL_CALL_RE.finditer(text):
+        if first is None:
+            first = match.start()
+        body = match.group(1).strip()
+        if not body.startswith("call:"):
+            continue
+        name, brace, args = body[len("call:"):].partition("{")
+        if not brace or not args.endswith("}"):
+            continue
+        calls.append({
+            "id": "call_" + hashlib.sha1(f"{name}{args}{time.time()}".encode()).hexdigest()[:16],
+            "type": "function",
+            "function": {
+                "name": name.strip(),
+                "arguments": json.dumps(_parse_gemma_pairs(args[:-1])),
+            },
+        })
+    return (text[:first] if calls else text), calls
 
 
 def _gguf_vision_prepare(prompt: str, images: list[bytes], add_special: bool):
@@ -735,13 +827,21 @@ def _gguf_chat_completions(req: ChatReq):
     lib = model.engine.lib
     vocab = model.vocab
     messages, images = _gguf_split_images(req.messages)
+    template_kwargs: dict[str, Any] = {"tokenize": False, "add_generation_prompt": True}
+    if req.tools:
+        template_kwargs["tools"] = req.tools
+        if req.tool_choice:
+            template_kwargs["tool_choice"] = req.tool_choice
     try:
         prompt = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True,
-            enable_thinking=req.thinking)
+            messages, enable_thinking=req.thinking, **template_kwargs)
     except TypeError:
-        prompt = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True)
+        try:
+            prompt = tokenizer.apply_chat_template(messages, **template_kwargs)
+        except TypeError:
+            template_kwargs.pop("tools", None)
+            template_kwargs.pop("tool_choice", None)
+            prompt = tokenizer.apply_chat_template(messages, **template_kwargs)
 
     t0 = time.perf_counter()
     import numpy
@@ -803,14 +903,22 @@ def _gguf_chat_completions(req: ChatReq):
         reasoning = think.replace("<think>", "").strip() or reasoning
     content = text.replace("<channel|>", "").replace("<|channel>thought", "").strip()
 
-    message = {"role": "assistant", "content": content}
+    tool_calls: list[dict] = []
+    if req.tools:
+        content, tool_calls = _parse_tool_calls(content)
+        content = content.strip()
+
+    message = {"role": "assistant", "content": (content or None) if tool_calls else content}
     if reasoning:
         message["reasoning_content"] = reasoning
+    if tool_calls:
+        message["tool_calls"] = tool_calls
     return {
         "id": f"chatcmpl-{CHAT_MODEL}",
         "object": "chat.completion",
         "model": req.model,
-        "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
+        "choices": [{"index": 0, "message": message,
+                     "finish_reason": "tool_calls" if tool_calls else "stop"}],
         "usage": {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": generated,
