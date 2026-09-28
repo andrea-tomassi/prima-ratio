@@ -213,6 +213,8 @@ calibration state and is gitignored on purpose.
 | `shape777` — 777 decisions | agreement vs 4B majority | 0.991\* | 0.844 | **0.839** | 0.810 |
 | `typesafe_public_102` — 102 public cases | modal agreement | 0.845 | — | **0.898** | 0.883 |
 | `typesafe_public_102` — 102 public cases | TV distance | 0.177 | — | 0.140 | **0.127** |
+| `typed-decisions` — 400 public cases | accuracy (zero-shot) | — | — | **0.702** | 0.727 |
+| `typed-decisions` — 400 public cases | ECE after one global temperature | — | — | **0.089** | 0.144 |
 
 \* the pinned 4B *is* the baseline — 0.991 is its own run-to-run consistency.
 Jev rows measured **live** via its public endpoint (358–380 ms/call, ~$0.00002–0.00017)

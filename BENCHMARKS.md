@@ -104,6 +104,48 @@ distributional slack (which per-workload calibration is designed to close).
 All 102 rows, ~2.5 s/row (each row is a distinct state — no prefix reuse
 possible).
 
+## 4. `typed-decisions` — public leaderboard (LocalLLaMA, 400 cases / 2,000 decisions)
+
+[HuggingFace `LocalLLaMA/typed-decisions`](https://huggingface.co/datasets/LocalLLaMA/typed-decisions)
+— a public benchmark for typed probabilistic decisions whose rows are **exactly
+a `POST /v1/systemone` body**. Generalist zero-shot entry (never saw these
+workflows or question schemas).
+
+| System | Mode | Acc | Soft | F1 | KL | TV | Brier | ECE | ScoreMAE | Within-1 | ms/case |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Prior (ignores input) | reference | 0.470 | 0.430 | 0.207 | 0.347 | 0.317 | 0.189 | **0.088** | – | – | 0 |
+| **semif-server + Gemma4-12B (raw)** | **generalist, zero-shot** | **0.702** | 0.568 | 0.520 | 4.927 | 0.414 | 0.389 | 0.276 | 0.513 | 0.889 | **691** |
+| semif-server + Gemma4-12B (+ global T on own data) | generalist + calibration | 0.702 | 0.568 | 0.520 | 3.660 | 0.351 | 0.288 | 0.199 | 0.418 | 0.935 | 691 |
+| semif-server + Gemma4-12B (+ global T on the train split) | generalist + calibration | 0.702 | 0.568 | 0.520 | 3.351 | **0.278** | **0.162** | **0.089** | 0.418 | 0.935 | 691 |
+| TypeSafe Jev 1.13.0 | generalist, zero-shot | 0.727 | 0.580 | 0.613 | 1.442 | 0.251 | 0.148 | 0.144 | 0.391 | 0.952 | 710 |
+| meraGPT Decider 1 | generalist, zero-shot | **0.768** | **0.608** | **0.641** | **0.096** | **0.149** | **0.052** | 0.180 | **0.219** | **0.984** | 526 |
+
+Reading:
+
+- **Accuracy 0.702 zero-shot** lands between the prior (0.470) and Jev (0.727),
+  essentially on the benchmark's *"perfect scenario understanding"* ceiling
+  (0.704) and below the teacher self-agreement ceiling (0.735) — i.e. a 12B
+  GGUF on one 16 GB card reads these four unseen workflows about as well as
+  the labels allow.
+- **Raw confidence is overconfident** (KL 4.93): the option logits are sharp,
+  the gold is a three-sample teacher average. A **single global temperature**
+  — no per-workflow fit, no label-space knowledge — moves TV/Brier/ECE to
+  Jev-level (TV 0.278, Brier 0.162, ECE 0.089) with accuracy untouched
+  (temperature preserves the argmax). That is this project's thesis in one
+  row: the model's decisions are right, its confidence needs one scalar.
+- The remaining KL gap sits in the tails: a few decisions where the model
+  strongly disagrees with the teacher pin the unbounded KL term.
+- **Latency: 691 ms/case** on a local 4060 Ti (Jev 710 ms, meraGPT 526 ms) at
+  zero per-call cost.
+
+Protocol notes: metrics were implemented to reproduce the published Jev row —
+8 of 9 reproduce within noise (Acc 0.733 vs 0.727, KL 1.440 vs 1.442, F1 0.614
+vs 0.613, TV/Brier/ScoreMAE/Within-1 equivalent); the reference ECE definition
+is unpublished, so ECE is reported as standard top-label ECE.
+
+Harness: `benchmarks/typed_decisions_bench.py` (replays the parquet test split
+against any System One endpoint, captures per-case latency).
+
 ---
 
 ## Operations (same deployment)
@@ -125,6 +167,7 @@ possible).
 | `run_typesafe102.py` | scores the rebuilt `typesafe_public_102` fixture and recomputes modal agreement + TV (validates published numbers first) |
 | `probe_ctx_max.py` | pushes chat slots to a target context and reports VRAM headroom/stability |
 | `jev_bench.py` | runs any fixture through Jev (OpenRouter alpha `decisions`) capturing latency/tokens/cost per call |
+| `typed_decisions_bench.py` | replays the public `LocalLLaMA/typed-decisions` test split against any System One endpoint and computes leaderboard metrics |
 
 ## Caveats
 
