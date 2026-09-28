@@ -15,6 +15,11 @@ services:
       # - SEMIF_GGUF=/models/gemma-4-12b-it-UD-Q6_K_XL.gguf
       # - SEMIF_LLAMA_GPU_LAYERS=-1
       # - SEMIF_MODEL_NAME=semif-gemma4-12b
+      # - SEMIF_MMPROJ=/models/mmproj-F16.gguf   # vision (chat + decisions)
+      # - SEMIF_MAX_TOKENS=150000                # long context
+      # - SEMIF_KV_TYPE_K=q8_0
+      # - SEMIF_KV_TYPE_V=q8_0                   # q8 KV: half memory + flash attention
+      # - SEMIF_SWA_FULL=0                       # window-sized SWA cache (100K+ on 16 GB)
     volumes:
       - ${HF_CACHE_DIR:-${HOME}/.cache/huggingface}:/cache/huggingface
       - ./build:/app/build                       # calibration manifest lives here

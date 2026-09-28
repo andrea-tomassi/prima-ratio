@@ -48,13 +48,13 @@ RUN git clone https://github.com/TheoLeeCJ/SemIf-OpenJev.git /tmp/semif \
     && uv pip install --no-cache "/tmp/semif" fastapi uvicorn "llama-cpp-python==0.3.35" \
     && rm -rf /root/.cache/uv /root/.cache/pip /tmp/semif
 
-# opt-in GPU offload: n_gpu_layers is read from SEMIF_LLAMA_GPU_LAYERS at load
-# time (llama.cpp semantics: 0 = CPU only, -1 = all layers, N = first N).
-# Default stays 0 so the upstream CPU-only behaviour is unchanged unless asked.
+# vendored llama.cpp backend (env-gated: GPU offload, KV type, SWA window)
+COPY patch/llamacpp_backend.py /tmp/llamacpp_backend.py
 RUN SITE="$(python -c 'import pathlib, semif_phase1; print(pathlib.Path(semif_phase1.__file__).parent)')" \
-    && sed -i 's/params\.n_gpu_layers = 0/params.n_gpu_layers = int(os.environ.get("SEMIF_LLAMA_GPU_LAYERS", "0"))/' "$SITE/llamacpp_backend.py" \
-    && sed -i 's/"n_gpu_layers": 0,/"n_gpu_layers": int(os.environ.get("SEMIF_LLAMA_GPU_LAYERS", "0")),/' "$SITE/llamacpp_backend.py" \
-    && grep -q SEMIF_LLAMA_GPU_LAYERS "$SITE/llamacpp_backend.py"
+    && cp /tmp/llamacpp_backend.py "$SITE/llamacpp_backend.py" \
+    && grep -q SEMIF_LLAMA_GPU_LAYERS "$SITE/llamacpp_backend.py" \
+    && grep -q SEMIF_SWA_FULL "$SITE/llamacpp_backend.py" \
+    && rm /tmp/llamacpp_backend.py
 # note: `import llama_cpp` is NOT run at build time — libllama.so links against
 # libcuda.so.1, which only exists at runtime through the NVIDIA container toolkit.
 

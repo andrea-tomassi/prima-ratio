@@ -10,6 +10,9 @@ Scenarios map to MODEL SUFFIXES (OpenRouter-style): the model field carries the 
 
 State is prefilled once and all questions are scored in parallel (SemIf shared mode,
 with per-row direct fallback when the tokenized state prefix is not stable).
+`state` may also be a list of OpenAI-style content parts: images (base64 data
+URLs) join the decision context through the vision projector, and the option
+logits are read conditioned on the image (GGUF backend + SEMIF_MMPROJ only).
 Also: POST /v1/chat/completions — normal chat on the same in-memory model.
 Scenario temperatures live in build/calibration-manifest.json.
 
@@ -21,6 +24,7 @@ Backends (env-driven, see README):
 Environment: SEMIF_MODEL / SEMIF_REVISION / SEMIF_MODEL_NAME / SEMIF_MANIFEST /
 SEMIF_MAX_TOKENS also override their defaults.
 """
+import hashlib
 import json
 import math
 import os
@@ -35,7 +39,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from semif_phase1 import direct as direct_module
-from semif_phase1.core import load_causal_model, validate_row
+from semif_phase1.core import LETTERS, load_causal_model, validate_row
 from semif_phase1.shared import score_shared
 
 BACKEND = os.environ.get("SEMIF_BACKEND", "torch").strip().lower()
@@ -50,6 +54,7 @@ MODEL_SOURCE = os.environ.get("SEMIF_MODEL", _DEFAULT_SOURCE)
 REVISION = os.environ.get("SEMIF_REVISION", _DEFAULT_REVISION)
 MODEL_BASE = os.environ.get("SEMIF_MODEL_NAME", _DEFAULT_NAME)
 GGUF_PATH = os.environ.get("SEMIF_GGUF")
+MMPROJ_PATH = os.environ.get("SEMIF_MMPROJ")
 MAX_TOKENS = int(os.environ.get("SEMIF_MAX_TOKENS", "4096"))
 CHAT_MODEL = os.environ.get("SEMIF_CHAT_NAME", MODEL_BASE.removeprefix("semif-") + "-chat")
 DEFAULT_TRUE = "Yes. The evidence supports an affirmative answer to the question."
@@ -202,7 +207,8 @@ def models():
             "meta": {k: e.get(k) for k in ("temperature", "n_fit", "ece_raw", "ece_out_of_fold", "fitted_at", "description") if e.get(k) is not None},
         })
     data.append({"id": CHAT_MODEL, "object": "model", "created": now,
-                 "owned_by": "semif-server", "meta": {"variant": "normal chat completions (POST /v1/chat/completions)"}})
+                 "owned_by": "semif-server", "meta": {"variant": "normal chat completions (POST /v1/chat/completions)",
+                                                         "vision": bool(MMPROJ_PATH)}})
     return {"object": "list", "data": data}
 
 
@@ -233,16 +239,21 @@ def systemone(req: Req):
 
     t0 = time.perf_counter()
     with _GEN_LOCK:
-        try:
-            results, timing = _score_shared(model, tokenizer, rows, metadata)
-            score_mode = "shared"
-        except ValueError:
-            # shared mode requires a stable tokenized state prefix (BPE boundary effects,
-            # e.g. a state ending in a quote char); fall back to per-row direct scoring —
-            # identical readout, no prefix reuse.
-            results = [_score_direct(model, tokenizer, r, metadata) for r in rows]
-            timing = {"mode": "direct-fallback"}
-            score_mode = "direct"
+        if _state_has_images(req.state):
+            with _CHAT_LOCK:
+                results, timing = _gguf_vision_score_rows(rows, MAX_TOKENS)
+            score_mode = "vision"
+        else:
+            try:
+                results, timing = _score_shared(model, tokenizer, rows, metadata, MAX_TOKENS)
+                score_mode = "shared"
+            except ValueError:
+                # shared mode requires a stable tokenized state prefix (BPE boundary effects,
+                # e.g. a state ending in a quote char); fall back to per-row direct scoring —
+                # identical readout, no prefix reuse.
+                results = [_score_direct(model, tokenizer, r, metadata, MAX_TOKENS) for r in rows]
+                timing = {"mode": "direct-fallback"}
+                score_mode = "direct"
     latency_ms = round((time.perf_counter() - t0) * 1000, 1)
 
     if entry:
@@ -335,6 +346,10 @@ def _gguf_decode(lib, context, tokens: list[int], start: int, want_logits: bool)
             lib.llama_batch_free(batch)
     if not want_logits:
         return None
+    return _gguf_last_logits(lib, context)
+
+
+def _gguf_last_logits(lib, context):
     import ctypes
 
     import numpy
@@ -359,6 +374,12 @@ def _gguf_chat_context(lib, native_model, need_tokens: int):
     params.n_ctx = max(need_tokens, 2048)
     params.n_seq_max = 1
     params.n_outputs_max = 1
+    try:  # vendored llama.cpp patch: KV type / SWA window knobs
+        from semif_phase1.llamacpp_backend import _apply_context_env
+    except ImportError:
+        pass
+    else:
+        _apply_context_env(lib, params)
     context = lib.llama_init_from_model(native_model, params)
     if not context:
         raise RuntimeError("llama.cpp failed to create the chat context")
@@ -391,29 +412,294 @@ def _sample_token(logits, temperature, top_p, rng):
     return int(rng.choice(len(probs), p=probs))
 
 
+_GGUF_VISION = {"context": None}
+
+
+def _gguf_vision_context():
+    """Lazy mtmd (vision projector) context bound to the loaded GGUF model."""
+    context = _GGUF_VISION["context"]
+    if context is not None:
+        return context
+    if not MMPROJ_PATH or not os.path.isfile(MMPROJ_PATH):
+        raise HTTPException(
+            status_code=400,
+            detail="vision is not enabled on this server (set SEMIF_MMPROJ to a projector .gguf)",
+        )
+    import llama_cpp.mtmd_cpp as mtmd
+
+    context = mtmd.mtmd_init_from_file(
+        MMPROJ_PATH.encode("utf-8"), model.engine.model, mtmd.mtmd_context_params_default())
+    if context is None:
+        raise HTTPException(status_code=500, detail="failed to load the vision projector")
+    _GGUF_VISION["context"] = context
+    return context
+
+
+def _gguf_split_images(messages: list[dict]):
+    """Swap image parts for the multimodal marker and collect their bytes.
+
+    Images must arrive as base64 data URLs (OpenAI-style content parts).
+    Returns (messages_for_template, [image_bytes, ...]).
+    """
+    import base64
+
+    import llama_cpp.mtmd_cpp as mtmd
+
+    marker = mtmd.mtmd_default_marker().decode("utf-8")
+    converted, blobs = [], []
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            converted.append(message)
+            continue
+        parts = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "image_url":
+                url = part.get("image_url")
+                url = url.get("url") if isinstance(url, dict) else url
+                if not isinstance(url, str) or not url.startswith("data:") or ";base64" not in url:
+                    raise HTTPException(status_code=400, detail="images must be base64 data URLs")
+                try:
+                    blobs.append(base64.b64decode(url.partition(",")[2]))
+                except Exception as error:
+                    raise HTTPException(status_code=400, detail="invalid base64 image payload") from error
+                parts.append({"type": "text", "text": marker})
+            else:
+                parts.append(part)
+        converted.append({**message, "content": parts})
+    return converted, blobs
+
+
+def _gguf_eval_vision(lib, prompt: str, images: list[bytes], max_tokens: int):
+    """Tokenize (mtmd) and evaluate a multimodal prompt on the chat context.
+
+    Returns (context, last_logits, next_position, prompt_tokens).
+    """
+    import ctypes
+
+    import llama_cpp.mtmd_cpp as mtmd
+
+    vision = _gguf_vision_context()
+    bitmaps, chunks = [], None
+    try:
+        for blob in images:
+            buffer = (ctypes.c_uint8 * len(blob)).from_buffer(bytearray(blob))
+            bitmap = mtmd.mtmd_helper_bitmap_init_from_buf(vision, buffer, len(blob), False)
+            if bitmap is None:
+                raise HTTPException(status_code=400, detail="unsupported or corrupt image payload")
+            bitmaps.append(bitmap)
+        text = mtmd.mtmd_input_text()
+        payload = prompt.encode("utf-8")
+        text.text = payload
+        text.text_len = len(payload)
+        text.add_special = True
+        text.parse_special = True
+        chunks = mtmd.mtmd_input_chunks_init()
+        if chunks is None:
+            raise RuntimeError("mtmd_input_chunks_init returned NULL")
+        bitmap_array = (mtmd.mtmd_bitmap_p_ctypes * len(bitmaps))(*bitmaps)
+        status = mtmd.mtmd_tokenize(vision, chunks, ctypes.byref(text), bitmap_array, len(bitmaps))
+        if status != 0:
+            raise HTTPException(status_code=400, detail=f"multimodal tokenization failed (code {status})")
+        prompt_tokens = int(mtmd.mtmd_helper_get_n_pos(chunks))
+        if prompt_tokens <= 0:
+            raise HTTPException(status_code=400, detail="empty multimodal prompt")
+        context = _gguf_chat_context(lib, model.engine.model, prompt_tokens + max_tokens + 8)
+        lib.llama_memory_clear(lib.llama_get_memory(context), True)
+        next_position = ctypes.c_int32(0)
+        status = mtmd.mtmd_helper_eval_chunks(
+            vision, context, chunks, 0, 0, 512, True, ctypes.byref(next_position))
+        if status != 0:
+            raise HTTPException(status_code=500, detail=f"multimodal evaluation failed (code {status})")
+        return context, _gguf_last_logits(lib, context), int(next_position.value), prompt_tokens
+    finally:
+        if chunks is not None:
+            mtmd.mtmd_input_chunks_free(chunks)
+        for bitmap in bitmaps:
+            mtmd.mtmd_bitmap_free(bitmap)
+
+
+# --- vision decisions: option logits read with an image in the context ---
+VISION_PROMPT_VERSION = "direct-options-vision-v1"
+VISION_ANSWER_CUE = "Answer:"
+
+
+def _state_has_images(state) -> bool:
+    return isinstance(state, list) and any(
+        isinstance(part, dict) and part.get("type") == "image_url" for part in state)
+
+
+def _state_text_and_images(state) -> tuple[str, list[bytes]]:
+    """Normalize a SystemOne state into (text, image blobs).
+
+    A plain string is text; a list carries OpenAI-style content parts — text
+    parts concatenate, image_url parts (base64 data URLs) become blobs and
+    leave the multimodal marker in the text at their position.
+    """
+    if isinstance(state, str):
+        return state, []
+    if isinstance(state, dict):
+        return json.dumps(state, ensure_ascii=False), []
+    import base64
+
+    import llama_cpp.mtmd_cpp as mtmd
+
+    marker = mtmd.mtmd_default_marker().decode("utf-8")
+    chunks, blobs = [], []
+    for part in state:
+        if not isinstance(part, dict):
+            raise HTTPException(status_code=400, detail="each state part must be an object")
+        kind = part.get("type")
+        if kind == "text":
+            chunks.append(str(part.get("text", "")))
+        elif kind == "image_url":
+            url = part.get("image_url")
+            url = url.get("url") if isinstance(url, dict) else url
+            if not isinstance(url, str) or not url.startswith("data:") or ";base64" not in url:
+                raise HTTPException(status_code=400, detail="state images must be base64 data URLs")
+            try:
+                blobs.append(base64.b64decode(url.partition(",")[2]))
+            except Exception as error:
+                raise HTTPException(status_code=400, detail="invalid base64 image payload") from error
+            chunks.append(marker)
+        else:
+            raise HTTPException(status_code=400, detail=f"unsupported state part type: {kind!r}")
+    return "\n".join(chunks), blobs
+
+
+def _vision_prompt(state_text: str, row: dict) -> str:
+    options = " ".join(
+        f"{LETTERS[index]}) {option['description']}" for index, option in enumerate(row["options"]))
+    return (
+        "<bos><|turn>user\n"
+        f"{state_text}\n\n{row['question']}\nOptions: {options}\n"
+        "Answer with a single letter, nothing else.\n<turn|>\n<|turn>model\n" + VISION_ANSWER_CUE
+    )
+
+
+def _gguf_vision_score_rows(rows: list[dict], max_tokens: int):
+    """Score rows whose state carries images: mtmd prompt + option-slot readout.
+
+    One mtmd evaluation per row — [image(s)] + text prompt — then the option
+    token logits are read at the last position: the same quantity as the text
+    path (full-vocabulary logits restricted to the declared options).
+    """
+    if BACKEND != "llamacpp":
+        raise HTTPException(status_code=400,
+                            detail="vision decisions require the GGUF backend (SEMIF_BACKEND=llamacpp)")
+    import ctypes
+
+    import llama_cpp.mtmd_cpp as mtmd
+
+    lib = model.engine.lib
+    vision = _gguf_vision_context()
+    results = []
+    for row in rows:
+        state_text, blobs = _state_text_and_images(row.get("state"))
+        if not blobs:
+            raise HTTPException(status_code=400, detail="vision rows must carry at least one image")
+        letters = LETTERS[: len(row["options"])]
+        slots = {}
+        for letter in letters:
+            token_ids = tokenizer.encode(letter, add_special_tokens=False)
+            if len(token_ids) != 1:
+                raise HTTPException(status_code=400, detail=f"option letter {letter!r} is not a single token")
+            slots[letter] = token_ids[0]
+            if tokenizer.encode(VISION_ANSWER_CUE + letter, add_special_tokens=False) != \
+                    tokenizer.encode(VISION_ANSWER_CUE, add_special_tokens=False) + [slots[letter]]:
+                raise HTTPException(status_code=400,
+                                    detail=f"answer boundary shifts tokenization for option {letter!r}")
+        prompt = _vision_prompt(state_text, row)
+        bitmaps, chunks = [], None
+        try:
+            for blob in blobs:
+                buffer = (ctypes.c_uint8 * len(blob)).from_buffer(bytearray(blob))
+                bitmap = mtmd.mtmd_helper_bitmap_init_from_buf(vision, buffer, len(blob), False)
+                if bitmap is None:
+                    raise HTTPException(status_code=400, detail="unsupported or corrupt state image")
+                bitmaps.append(bitmap)
+            text = mtmd.mtmd_input_text()
+            payload = prompt.encode("utf-8")
+            text.text = payload
+            text.text_len = len(payload)
+            text.add_special = False
+            text.parse_special = True
+            chunks = mtmd.mtmd_input_chunks_init()
+            if chunks is None:
+                raise RuntimeError("mtmd_input_chunks_init returned NULL")
+            bitmap_array = (mtmd.mtmd_bitmap_p_ctypes * len(bitmaps))(*bitmaps)
+            status = mtmd.mtmd_tokenize(vision, chunks, ctypes.byref(text), bitmap_array, len(bitmaps))
+            if status != 0:
+                raise HTTPException(status_code=400, detail=f"multimodal tokenization failed (code {status})")
+            prompt_tokens = int(mtmd.mtmd_helper_get_n_pos(chunks))
+            if prompt_tokens <= 0:
+                raise HTTPException(status_code=400, detail="empty multimodal prompt")
+            context = _gguf_chat_context(lib, model.engine.model, prompt_tokens + 8)
+            lib.llama_memory_clear(lib.llama_get_memory(context), True)
+            next_position = ctypes.c_int32(0)
+            status = mtmd.mtmd_helper_eval_chunks(
+                vision, context, chunks, 0, 0, 512, True, ctypes.byref(next_position))
+            if status != 0:
+                raise HTTPException(status_code=500, detail=f"multimodal evaluation failed (code {status})")
+            logits = _gguf_last_logits(lib, context)
+        finally:
+            if chunks is not None:
+                mtmd.mtmd_input_chunks_free(chunks)
+            for bitmap in bitmaps:
+                mtmd.mtmd_bitmap_free(bitmap)
+        raw = [float(logits[slots[letter]]) for letter in letters]
+        results.append({
+            "id": row["id"],
+            "option_ids": [option["id"] for option in row["options"]],
+            "probabilities": _softmax(raw, 1.0),
+            "option_logits": raw,
+            "answer_token_ids": [slots[letter] for letter in letters],
+            "input_tokens": prompt_tokens,
+            "prompt_sha256": hashlib.sha256(prompt.encode("utf-8") + b"".join(blobs)).hexdigest(),
+            "prompt_version": VISION_PROMPT_VERSION,
+            "readout": "vision-options-v1",
+        })
+    return results, {"mode": "vision-direct", "rows": len(rows)}
+
+
+def _score_row(row: dict, metadata: dict):
+    """Score one row: multimodal when its state carries images, text otherwise."""
+    if _state_has_images(row.get("state")):
+        results, _ = _gguf_vision_score_rows([row], MAX_TOKENS)
+        return results[0]
+    return _score_direct(model, tokenizer, row, metadata, MAX_TOKENS)
+
+
 def _gguf_chat_completions(req: ChatReq):
     from semif_phase1.llamacpp_backend import _gguf_piece, _gguf_tokenize
 
     lib = model.engine.lib
     vocab = model.vocab
+    messages, images = _gguf_split_images(req.messages)
     try:
         prompt = tokenizer.apply_chat_template(
-            req.messages, tokenize=False, add_generation_prompt=True,
+            messages, tokenize=False, add_generation_prompt=True,
             enable_thinking=req.thinking)
     except TypeError:
         prompt = tokenizer.apply_chat_template(
-            req.messages, tokenize=False, add_generation_prompt=True)
-    ids = _gguf_tokenize(lib, vocab, prompt)
-    if not ids:
-        raise HTTPException(status_code=400, detail="empty chat prompt")
+            messages, tokenize=False, add_generation_prompt=True)
 
     t0 = time.perf_counter()
     import numpy
 
     with _CHAT_LOCK, _GEN_LOCK:
-        context = _gguf_chat_context(lib, model.engine.model, len(ids) + req.max_tokens + 8)
-        lib.llama_memory_clear(lib.llama_get_memory(context), True)
-        logits = _gguf_decode(lib, context, ids, 0, True)
+        if images:
+            context, logits, position, prompt_tokens = _gguf_eval_vision(
+                lib, prompt, images, req.max_tokens)
+        else:
+            ids = _gguf_tokenize(lib, vocab, prompt)
+            if not ids:
+                raise HTTPException(status_code=400, detail="empty chat prompt")
+            prompt_tokens = len(ids)
+            context = _gguf_chat_context(lib, model.engine.model, prompt_tokens + req.max_tokens + 8)
+            lib.llama_memory_clear(lib.llama_get_memory(context), True)
+            logits = _gguf_decode(lib, context, ids, 0, True)
+            position = prompt_tokens
         eos_ids = set()
         try:
             eos_ids.add(int(lib.llama_vocab_eos(vocab)))
@@ -422,7 +708,6 @@ def _gguf_chat_completions(req: ChatReq):
         rng = numpy.random.default_rng()
         pieces = bytearray()
         generated = 0
-        position = len(ids)
         stop_markers = ("<turn|>", "<end_of_turn>", "<eos>", "</s>")
         for _ in range(max(0, req.max_tokens)):
             token = _sample_token(logits, req.temperature, req.top_p, rng)
@@ -461,9 +746,9 @@ def _gguf_chat_completions(req: ChatReq):
         "model": req.model,
         "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
         "usage": {
-            "prompt_tokens": len(ids),
+            "prompt_tokens": prompt_tokens,
             "completion_tokens": generated,
-            "total_tokens": len(ids) + generated,
+            "total_tokens": prompt_tokens + generated,
         },
         "timings": {
             "generation_seconds": round(dt, 2),
@@ -647,7 +932,7 @@ def calibrate(req: CalibrateReq):
     t0 = time.perf_counter()
     with _GEN_LOCK:
         for gold, _, label in rows:
-            res = _score_direct(model, tokenizer, gold, metadata)
+            res = _score_row(gold, metadata)
             logits = res["option_logits"]
             ti = res["option_ids"].index(gold["options"][label]["id"])
             pairs.append((logits, ti))
@@ -703,7 +988,7 @@ def calibrate(req: CalibrateReq):
         with _GEN_LOCK:
             for gold, _, label in hrows:
                 validate_row(gold)
-                res = _score_direct(model, tokenizer, gold, metadata)
+                res = _score_row(gold, metadata)
                 logits = res["option_logits"]
                 ti = res["option_ids"].index(gold["options"][label]["id"])
                 hpairs.append((logits, ti))
