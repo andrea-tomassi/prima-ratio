@@ -277,7 +277,7 @@ The essentials — context sizes, cache types and slot tuning live in
 | `PRIMA_CACHE` | `/cache` | engine + tokenizer cache folder — mount it to persist |
 | `PRIMA_GGUF` / `PRIMA_MMPROJ` | — | explicit asset paths (override the engine) |
 | `PRIMA_MAX_TOKENS` | `4096` | scoring context budget |
-| `PRIMA_CHAT_TOKENS` | `180000` | total chat/vision context, split across slots |
+| `PRIMA_CHAT_TOKENS` | `200000` | total chat/vision context, split across slots |
 | `PRIMA_PARALLEL` | `1` | concurrent chat/vision generation slots |
 | `PRIMA_CALIBRATED_TEMPERATURE` | `3.4` | built-in `:calibrated` temperature |
 | `PRIMA_MANIFEST` | `build/calibration-manifest.json` | calibration state file (mount it, back it up) |

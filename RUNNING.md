@@ -86,7 +86,7 @@ upstream full-size default makes KV memory grow with the whole context);
 
 `PRIMA_PARALLEL` (default `1`) sets how many chat/vision generations run at
 once on the shared weights — llama.cpp `--parallel` semantics. The total chat
-context (`PRIMA_CHAT_TOKENS`, default 180K) is split evenly across the slots:
+context (`PRIMA_CHAT_TOKENS`, default 200K) is split evenly across the slots:
 one slot gets the whole budget, two slots get half each. A request that
 exceeds its slot's share is refused with a **400 that explains the budget**
 (never silently truncated). Decisions are single 130 ms forwards and stay

@@ -407,7 +407,7 @@ class ChatReq(BaseModel):
 
 # --- GGUF chat: a pool of generation contexts (model weights shared) ---
 CHAT_PARALLEL = max(1, int(os.environ.get("PRIMA_PARALLEL", "1")))
-CHAT_TOKENS = int(os.environ.get("PRIMA_CHAT_TOKENS", "180000"))  # total across slots; 0 = unlimited
+CHAT_TOKENS = int(os.environ.get("PRIMA_CHAT_TOKENS", "200000"))  # total across slots; 0 = unlimited
 CHAT_SLOT_TOKENS = CHAT_TOKENS // CHAT_PARALLEL if CHAT_TOKENS else 0
 _VISION_LOCK = threading.Lock()
 _CHAT_SLOTS: list[dict] = []
