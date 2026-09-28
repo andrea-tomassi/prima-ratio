@@ -1,8 +1,7 @@
 services:
   semif-server:
-    # torch variant (Qwen3.5-4B bf16):   ghcr.io/andrea-tomassi/semif-server:latest
-    # GGUF variant (llama.cpp + local .gguf): ghcr.io/andrea-tomassi/semif-server:gguf
-    image: ${SEMIF_IMAGE:-ghcr.io/andrea-tomassi/semif-server:latest}
+    # the distribution: llama.cpp + a local .gguf file (see README)
+    image: ${SEMIF_IMAGE:-ghcr.io/andrea-tomassi/semif-server:gguf}
     container_name: semif-server
     ports:
       - "8000:8000"
@@ -20,6 +19,7 @@ services:
       # - SEMIF_KV_TYPE_K=q8_0
       # - SEMIF_KV_TYPE_V=q8_0                   # q8 KV: half memory + flash attention
       # - SEMIF_SWA_FULL=0                       # window-sized SWA cache (100K+ on 16 GB)
+      # - SEMIF_PARALLEL=2                       # concurrent generation slots (chat/vision)
     volumes:
       - ${HF_CACHE_DIR:-${HOME}/.cache/huggingface}:/cache/huggingface
       - ./build:/app/build                       # calibration manifest lives here

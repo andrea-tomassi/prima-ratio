@@ -15,7 +15,7 @@
 #     -e SEMIF_GGUF=/models/model.gguf \
 #     ghcr.io/andrea-tomassi/semif-server:gguf
 # ---------------------------------------------------------------------------
-FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS builder
+FROM nvidia/cuda:12.9.1-devel-ubuntu22.04 AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3.10 python3.10-venv python3.10-dev git build-essential ca-certificates \
@@ -28,10 +28,14 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 # CUDA arch must be pinned explicitly: the build container has no GPU, so the
 # "native" detection falls back to a 5.2 PTX target and every kernel is
-# JIT-compiled at runtime (~3x slower). 89 = Ada / RTX 4060 Ti; use 86 for
-# Ampere (RTX 3090) or a list like "86;89" for mixed fleets.
-ARG CUDA_ARCHS=89
+# JIT-compiled at runtime (~3x slower). Default list covers Turing -> Hopper
+# and Blackwell natively (RTX 20/30/40/50, A100, H100) plus a 120 PTX target
+# for forward compatibility. Narrow it for a faster build / smaller image.
+ARG CUDA_ARCHS="75;80;86;89;90;120;120-virtual"
 ENV CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS}"
+# nvcc is memory-hungry: cap parallel compile jobs on low-RAM builders
+ARG BUILD_PARALLEL=8
+ENV CMAKE_BUILD_PARALLEL_LEVEL=${BUILD_PARALLEL}
 
 RUN uv venv /opt/venv --python python3.10
 ENV VIRTUAL_ENV=/opt/venv \
@@ -59,7 +63,7 @@ RUN SITE="$(python -c 'import pathlib, semif_phase1; print(pathlib.Path(semif_ph
 # libcuda.so.1, which only exists at runtime through the NVIDIA container toolkit.
 
 # ---------------------------------------------------------------------------
-FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+FROM nvidia/cuda:12.9.1-runtime-ubuntu22.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3.10 libgomp1 ca-certificates \

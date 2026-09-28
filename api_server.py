@@ -24,6 +24,7 @@ Backends (env-driven, see README):
 Environment: SEMIF_MODEL / SEMIF_REVISION / SEMIF_MODEL_NAME / SEMIF_MANIFEST /
 SEMIF_MAX_TOKENS also override their defaults.
 """
+import contextlib
 import hashlib
 import json
 import math
@@ -208,7 +209,9 @@ def models():
         })
     data.append({"id": CHAT_MODEL, "object": "model", "created": now,
                  "owned_by": "semif-server", "meta": {"variant": "normal chat completions (POST /v1/chat/completions)",
-                                                         "vision": bool(MMPROJ_PATH)}})
+                                                         "vision": bool(MMPROJ_PATH),
+                                                         "parallel": CHAT_PARALLEL,
+                                                         "slot_tokens": CHAT_SLOT_TOKENS or None}})
     return {"object": "list", "data": data}
 
 
@@ -240,8 +243,7 @@ def systemone(req: Req):
     t0 = time.perf_counter()
     with _GEN_LOCK:
         if _state_has_images(req.state):
-            with _CHAT_LOCK:
-                results, timing = _gguf_vision_score_rows(rows, MAX_TOKENS)
+            results, timing = _gguf_vision_score_rows(rows, MAX_TOKENS)
             score_mode = "vision"
         else:
             try:
@@ -322,9 +324,65 @@ class ChatReq(BaseModel):
     thinking: bool = True
 
 
-# --- GGUF chat: generation on a secondary llama.cpp context (weights shared) ---
-_GGUF_CHAT = {"context": None, "capacity": 0}
-_CHAT_LOCK = threading.Lock()
+# --- GGUF chat: a pool of generation contexts (model weights shared) ---
+CHAT_PARALLEL = max(1, int(os.environ.get("SEMIF_PARALLEL", "1")))
+CHAT_TOKENS = int(os.environ.get("SEMIF_CHAT_TOKENS", "180000"))  # total across slots; 0 = unlimited
+CHAT_SLOT_TOKENS = CHAT_TOKENS // CHAT_PARALLEL if CHAT_TOKENS else 0
+_VISION_LOCK = threading.Lock()
+_CHAT_SLOTS: list[dict] = []
+_CHAT_SLOTS_LOCK = threading.Lock()
+_CHAT_FREE = threading.BoundedSemaphore(CHAT_PARALLEL)
+
+
+@contextlib.contextmanager
+def _chat_context_lease(lib, native_model, need_tokens: int):
+    """Exclusive lease on one of the CHAT_PARALLEL generation contexts.
+
+    Contexts share the loaded model weights and each carries its own KV cache,
+    so leases run truly concurrently (like llama.cpp `--parallel`). A lease
+    grows its context when a request needs more room.
+    """
+    _CHAT_FREE.acquire()
+    slot = None
+    try:
+        with _CHAT_SLOTS_LOCK:
+            for candidate in _CHAT_SLOTS:
+                if not candidate["busy"]:
+                    candidate["busy"] = True
+                    slot = candidate
+                    break
+            if slot is None:
+                slot = {"context": None, "capacity": 0, "busy": True}
+                _CHAT_SLOTS.append(slot)
+        context = slot["context"]
+        if context is None or need_tokens > slot["capacity"]:
+            if context is not None:
+                lib.llama_free(context)
+            params = lib.llama_context_default_params()
+            params.n_ctx = max(need_tokens, 2048)
+            params.n_seq_max = 1
+            params.n_outputs_max = 1
+            try:  # vendored llama.cpp patch: KV type / SWA window knobs
+                from semif_phase1.llamacpp_backend import _apply_context_env
+            except ImportError:
+                pass
+            else:
+                _apply_context_env(lib, params)
+            context = lib.llama_init_from_model(native_model, params)
+            if not context:
+                raise RuntimeError("llama.cpp failed to create a chat context")
+            capacity = int(lib.llama_n_ctx(context))
+            if need_tokens > capacity:
+                lib.llama_free(context)
+                raise RuntimeError("chat prompt does not fit the chat context")
+            slot["context"] = context
+            slot["capacity"] = capacity
+        yield slot["context"]
+    finally:
+        if slot is not None:
+            with _CHAT_SLOTS_LOCK:
+                slot["busy"] = False
+        _CHAT_FREE.release()
 
 
 def _gguf_decode(lib, context, tokens: list[int], start: int, want_logits: bool):
@@ -360,36 +418,6 @@ def _gguf_last_logits(lib, context):
     return numpy.ctypeslib.as_array(
         ctypes.cast(pointer, ctypes.POINTER(ctypes.c_float)), shape=(model.engine.vocab_size,)
     ).copy()
-
-
-def _gguf_chat_context(lib, native_model, need_tokens: int):
-    """Lazily create a dedicated chat context on the already-loaded model."""
-    context = _GGUF_CHAT["context"]
-    if context is not None and need_tokens <= _GGUF_CHAT["capacity"]:
-        return context
-    if context is not None:
-        lib.llama_free(context)
-        _GGUF_CHAT["context"] = None
-    params = lib.llama_context_default_params()
-    params.n_ctx = max(need_tokens, 2048)
-    params.n_seq_max = 1
-    params.n_outputs_max = 1
-    try:  # vendored llama.cpp patch: KV type / SWA window knobs
-        from semif_phase1.llamacpp_backend import _apply_context_env
-    except ImportError:
-        pass
-    else:
-        _apply_context_env(lib, params)
-    context = lib.llama_init_from_model(native_model, params)
-    if not context:
-        raise RuntimeError("llama.cpp failed to create the chat context")
-    capacity = int(lib.llama_n_ctx(context))
-    if need_tokens > capacity:
-        lib.llama_free(context)
-        raise RuntimeError("chat prompt does not fit the chat context")
-    _GGUF_CHAT["context"] = context
-    _GGUF_CHAT["capacity"] = capacity
-    return context
 
 
 def _sample_token(logits, temperature, top_p, rng):
@@ -470,10 +498,14 @@ def _gguf_split_images(messages: list[dict]):
     return converted, blobs
 
 
-def _gguf_eval_vision(lib, prompt: str, images: list[bytes], max_tokens: int):
-    """Tokenize (mtmd) and evaluate a multimodal prompt on the chat context.
+_STOP_MARKERS = ("<turn|>", "<end_of_turn>", "<eos>", "</s>")
 
-    Returns (context, last_logits, next_position, prompt_tokens).
+
+def _gguf_vision_prepare(prompt: str, images: list[bytes], add_special: bool):
+    """mtmd: bitmaps + input chunks + prompt position count (mtmd context shared).
+
+    Callers hold _VISION_LOCK around this and the matching evaluation.
+    Returns (vision, chunks, bitmaps, prompt_tokens).
     """
     import ctypes
 
@@ -492,7 +524,7 @@ def _gguf_eval_vision(lib, prompt: str, images: list[bytes], max_tokens: int):
         payload = prompt.encode("utf-8")
         text.text = payload
         text.text_len = len(payload)
-        text.add_special = True
+        text.add_special = add_special
         text.parse_special = True
         chunks = mtmd.mtmd_input_chunks_init()
         if chunks is None:
@@ -504,19 +536,59 @@ def _gguf_eval_vision(lib, prompt: str, images: list[bytes], max_tokens: int):
         prompt_tokens = int(mtmd.mtmd_helper_get_n_pos(chunks))
         if prompt_tokens <= 0:
             raise HTTPException(status_code=400, detail="empty multimodal prompt")
-        context = _gguf_chat_context(lib, model.engine.model, prompt_tokens + max_tokens + 8)
-        lib.llama_memory_clear(lib.llama_get_memory(context), True)
-        next_position = ctypes.c_int32(0)
-        status = mtmd.mtmd_helper_eval_chunks(
-            vision, context, chunks, 0, 0, 512, True, ctypes.byref(next_position))
-        if status != 0:
-            raise HTTPException(status_code=500, detail=f"multimodal evaluation failed (code {status})")
-        return context, _gguf_last_logits(lib, context), int(next_position.value), prompt_tokens
-    finally:
-        if chunks is not None:
-            mtmd.mtmd_input_chunks_free(chunks)
-        for bitmap in bitmaps:
-            mtmd.mtmd_bitmap_free(bitmap)
+    except BaseException:
+        _gguf_vision_release(chunks, bitmaps)
+        raise
+    return vision, chunks, bitmaps, prompt_tokens
+
+
+def _gguf_vision_release(chunks, bitmaps) -> None:
+    import llama_cpp.mtmd_cpp as mtmd
+
+    if chunks is not None:
+        mtmd.mtmd_input_chunks_free(chunks)
+    for bitmap in bitmaps:
+        mtmd.mtmd_bitmap_free(bitmap)
+
+
+def _check_chat_budget(prompt_tokens: int, max_tokens: int) -> int:
+    """Refuse requests above the per-slot share of SEMIF_CHAT_TOKENS (no truncation).
+
+    llama.cpp semantics: SEMIF_CHAT_TOKENS is the TOTAL context and each of the
+    SEMIF_PARALLEL slots gets total / parallel (e.g. 180000 with parallel=2 ->
+    90000 per slot).
+    """
+    need_tokens = prompt_tokens + max_tokens + 8
+    if CHAT_SLOT_TOKENS and need_tokens > CHAT_SLOT_TOKENS:
+        raise HTTPException(status_code=400, detail={
+            "error": "chat request exceeds the per-slot context budget",
+            "need_tokens": need_tokens,
+            "slot_tokens": CHAT_SLOT_TOKENS,
+            "total_tokens": CHAT_TOKENS,
+            "parallel": CHAT_PARALLEL,
+            "hint": "lower max_tokens / shorten the prompt, raise SEMIF_CHAT_TOKENS, or lower SEMIF_PARALLEL",
+        })
+    return need_tokens
+
+
+def _gguf_generate(lib, vocab, context, logits, position: int, req: ChatReq, eos_ids, rng):
+    """Autoregressive generation on a leased context; returns (pieces, generated)."""
+    from semif_phase1.llamacpp_backend import _gguf_piece
+
+    pieces = bytearray()
+    generated = 0
+    for _ in range(max(0, req.max_tokens)):
+        token = _sample_token(logits, req.temperature, req.top_p, rng)
+        if token in eos_ids:
+            break
+        pieces += _gguf_piece(lib, vocab, token)
+        generated += 1
+        seen = pieces.decode("utf-8", errors="ignore")
+        if any(marker in seen for marker in _STOP_MARKERS):
+            break
+        logits = _gguf_decode(lib, context, [token], position, True)
+        position += 1
+    return pieces, generated
 
 
 # --- vision decisions: option logits read with an image in the context ---
@@ -610,43 +682,20 @@ def _gguf_vision_score_rows(rows: list[dict], max_tokens: int):
                 raise HTTPException(status_code=400,
                                     detail=f"answer boundary shifts tokenization for option {letter!r}")
         prompt = _vision_prompt(state_text, row)
-        bitmaps, chunks = [], None
-        try:
-            for blob in blobs:
-                buffer = (ctypes.c_uint8 * len(blob)).from_buffer(bytearray(blob))
-                bitmap = mtmd.mtmd_helper_bitmap_init_from_buf(vision, buffer, len(blob), False)
-                if bitmap is None:
-                    raise HTTPException(status_code=400, detail="unsupported or corrupt state image")
-                bitmaps.append(bitmap)
-            text = mtmd.mtmd_input_text()
-            payload = prompt.encode("utf-8")
-            text.text = payload
-            text.text_len = len(payload)
-            text.add_special = False
-            text.parse_special = True
-            chunks = mtmd.mtmd_input_chunks_init()
-            if chunks is None:
-                raise RuntimeError("mtmd_input_chunks_init returned NULL")
-            bitmap_array = (mtmd.mtmd_bitmap_p_ctypes * len(bitmaps))(*bitmaps)
-            status = mtmd.mtmd_tokenize(vision, chunks, ctypes.byref(text), bitmap_array, len(bitmaps))
-            if status != 0:
-                raise HTTPException(status_code=400, detail=f"multimodal tokenization failed (code {status})")
-            prompt_tokens = int(mtmd.mtmd_helper_get_n_pos(chunks))
-            if prompt_tokens <= 0:
-                raise HTTPException(status_code=400, detail="empty multimodal prompt")
-            context = _gguf_chat_context(lib, model.engine.model, prompt_tokens + 8)
-            lib.llama_memory_clear(lib.llama_get_memory(context), True)
-            next_position = ctypes.c_int32(0)
-            status = mtmd.mtmd_helper_eval_chunks(
-                vision, context, chunks, 0, 0, 512, True, ctypes.byref(next_position))
-            if status != 0:
-                raise HTTPException(status_code=500, detail=f"multimodal evaluation failed (code {status})")
-            logits = _gguf_last_logits(lib, context)
-        finally:
-            if chunks is not None:
-                mtmd.mtmd_input_chunks_free(chunks)
-            for bitmap in bitmaps:
-                mtmd.mtmd_bitmap_free(bitmap)
+        with _VISION_LOCK:
+            vision, chunks, bitmaps, prompt_tokens = _gguf_vision_prepare(prompt, blobs, add_special=False)
+            try:
+                with _chat_context_lease(lib, model.engine.model, prompt_tokens + 8) as context:
+                    lib.llama_memory_clear(lib.llama_get_memory(context), True)
+                    next_position = ctypes.c_int32(0)
+                    status = mtmd.mtmd_helper_eval_chunks(
+                        vision, context, chunks, 0, 0, 512, True, ctypes.byref(next_position))
+                    if status != 0:
+                        raise HTTPException(status_code=500,
+                                            detail=f"multimodal evaluation failed (code {status})")
+                    logits = _gguf_last_logits(lib, context)
+            finally:
+                _gguf_vision_release(chunks, bitmaps)
         raw = [float(logits[slots[letter]]) for letter in letters]
         results.append({
             "id": row["id"],
@@ -671,7 +720,7 @@ def _score_row(row: dict, metadata: dict):
 
 
 def _gguf_chat_completions(req: ChatReq):
-    from semif_phase1.llamacpp_backend import _gguf_piece, _gguf_tokenize
+    from semif_phase1.llamacpp_backend import _gguf_tokenize
 
     lib = model.engine.lib
     vocab = model.vocab
@@ -687,43 +736,50 @@ def _gguf_chat_completions(req: ChatReq):
     t0 = time.perf_counter()
     import numpy
 
-    with _CHAT_LOCK, _GEN_LOCK:
-        if images:
-            context, logits, position, prompt_tokens = _gguf_eval_vision(
-                lib, prompt, images, req.max_tokens)
-        else:
-            ids = _gguf_tokenize(lib, vocab, prompt)
-            if not ids:
-                raise HTTPException(status_code=400, detail="empty chat prompt")
-            prompt_tokens = len(ids)
-            context = _gguf_chat_context(lib, model.engine.model, prompt_tokens + req.max_tokens + 8)
+    eos_ids = set()
+    try:
+        eos_ids.add(int(lib.llama_vocab_eos(vocab)))
+    except (AttributeError, TypeError):
+        pass
+    rng = numpy.random.default_rng()
+
+    if images:
+        import ctypes
+
+        import llama_cpp.mtmd_cpp as mtmd
+
+        with _VISION_LOCK:
+            vision, chunks, bitmaps, prompt_tokens = _gguf_vision_prepare(prompt, images, add_special=True)
+            try:
+                need_tokens = _check_chat_budget(prompt_tokens, req.max_tokens)
+                with _chat_context_lease(lib, model.engine.model, need_tokens) as context:
+                    lib.llama_memory_clear(lib.llama_get_memory(context), True)
+                    next_position = ctypes.c_int32(0)
+                    status = mtmd.mtmd_helper_eval_chunks(
+                        vision, context, chunks, 0, 0, 512, True, ctypes.byref(next_position))
+                    if status != 0:
+                        raise HTTPException(status_code=500,
+                                            detail=f"multimodal evaluation failed (code {status})")
+                    logits = _gguf_last_logits(lib, context)
+                    pieces, generated = _gguf_generate(
+                        lib, vocab, context, logits, int(next_position.value), req, eos_ids, rng)
+            finally:
+                _gguf_vision_release(chunks, bitmaps)
+    else:
+        ids = _gguf_tokenize(lib, vocab, prompt)
+        if not ids:
+            raise HTTPException(status_code=400, detail="empty chat prompt")
+        prompt_tokens = len(ids)
+        need_tokens = _check_chat_budget(prompt_tokens, req.max_tokens)
+        with _chat_context_lease(lib, model.engine.model, need_tokens) as context:
             lib.llama_memory_clear(lib.llama_get_memory(context), True)
             logits = _gguf_decode(lib, context, ids, 0, True)
-            position = prompt_tokens
-        eos_ids = set()
-        try:
-            eos_ids.add(int(lib.llama_vocab_eos(vocab)))
-        except (AttributeError, TypeError):
-            pass
-        rng = numpy.random.default_rng()
-        pieces = bytearray()
-        generated = 0
-        stop_markers = ("<turn|>", "<end_of_turn>", "<eos>", "</s>")
-        for _ in range(max(0, req.max_tokens)):
-            token = _sample_token(logits, req.temperature, req.top_p, rng)
-            if token in eos_ids:
-                break
-            pieces += _gguf_piece(lib, vocab, token)
-            generated += 1
-            seen = pieces.decode("utf-8", errors="ignore")
-            if any(marker in seen for marker in stop_markers):
-                break
-            logits = _gguf_decode(lib, context, [token], position, True)
-            position += 1
+            pieces, generated = _gguf_generate(
+                lib, vocab, context, logits, prompt_tokens, req, eos_ids, rng)
     dt = time.perf_counter() - t0
 
     text = pieces.decode("utf-8", errors="ignore")
-    for marker in stop_markers:
+    for marker in _STOP_MARKERS:
         text = text.replace(marker, "")
     reasoning = None
     if "<|channel>thought" in text:
