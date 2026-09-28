@@ -351,13 +351,20 @@ def systemone(req: Req):
                   "or fit your own workload with POST /v1/calibrate (see GET /v1/models)")
 
     answers = {}
-    input_tokens = 0
+    # Honest token accounting: in shared mode the state prefix is prefilled once
+    # and each question re-runs only its own suffix over the restored state — the
+    # per-row "input_tokens" (full prompt) would over-count by the number of
+    # questions. Direct-fallback and vision modes genuinely re-evaluate the full
+    # prompt per row, so there the per-row sum is the honest count.
+    if score_mode == "shared":
+        input_tokens = timing["prefix_tokens"] + timing["true_suffix_tokens"]
+    else:
+        input_tokens = sum(r.get("input_tokens", 0) for r in results)
     for r in results:
         qid = r["id"]
         logits = r.get("option_logits")
         probs = _softmax(logits, temperature) if logits else r["probabilities"]
         ids = r["option_ids"]
-        input_tokens += r.get("input_tokens", 0)
         t = types[qid]
         if t == "noul":
             answers[qid] = {"type": "noul", "noul": probs[ids.index("true")]}
