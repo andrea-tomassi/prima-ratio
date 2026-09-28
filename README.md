@@ -209,15 +209,17 @@ calibration state and is gitignored on purpose.
 
 | Fixture | Metric | SemIf 4B | SemIf 27B exl3 | **Gemma4-12B** *(this repo)* | Jev |
 |---|---|---|---|---|---|
-| `authored144` — 144 labeled rows | family-balanced accuracy | 0.813 | **0.958** | **0.938** | — |
-| `shape777` — 777 decisions | agreement vs 4B majority | 0.991\* | 0.844 | **0.839** | — |
+| `authored144` — 144 labeled rows | family-balanced accuracy | 0.813 | 0.958 | 0.938 | **0.963** |
+| `shape777` — 777 decisions | agreement vs 4B majority | 0.991\* | 0.844 | **0.839** | 0.810 |
 | `typesafe_public_102` — 102 public cases | modal agreement | 0.845 | — | **0.898** | 0.883 |
 | `typesafe_public_102` — 102 public cases | TV distance | 0.177 | — | 0.140 | **0.127** |
 
 \* the pinned 4B *is* the baseline — 0.991 is its own run-to-run consistency.
+Jev rows measured **live** via its public endpoint (358–380 ms/call, ~$0.00002–0.00017)
+reproducing its published outputs **102/102** before comparison.
 
 777 decisions in **2.4 min** batched (37 requests × 21 questions, prefix reuse) ·
-decisions at **127–144 ms** · full protocol, caveats and reproduction commands:
+local decisions at **127–144 ms** · full protocol, caveats and reproduction:
 **[BENCHMARKS.md](BENCHMARKS.md)**.
 
 ---

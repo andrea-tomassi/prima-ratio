@@ -44,12 +44,14 @@ balanced accuracies), the same protocol the SemIf reference uses.
 | SemIf (pinned reference) | Qwen3.5-4B, bf16 | 0.813 | 0.806 | SemIf `results/phase1-summary.json` |
 | SemIf exl3 bridge | Qwen3.8-27B, exl3 5.0bpw | **0.9579** | 0.9583 | SemIf `exl3-bridge/` |
 | **semif-server** ⋯ *this repo* | **Gemma4-12B, Q6_K_XL** | **0.9378** | **0.9444** | measured — `benchmarks/authored144_api.py` |
+| Jev (`typesafe/jev-1.13`, live) | closed service | **0.9630** | 0.9722 | measured — `benchmarks/jev_bench.py` |
 
 Per-family balanced accuracy (this repo): `candidate_selection` 0.944 ·
 `evidence_interpretation` 0.956 · `rule_application` 0.913.
 
 Reading: a 12B GGUF on a single 16 GB card lands **+12.5 points over the pinned
 4B** and within ~2 points of a 27B exl3 bridge running on much larger hardware.
+Jev — a closed frontier service — still leads the semantic axis (0.963).
 
 ## 2. `shape777` — systems geometry & numerical parity (777 decisions)
 
@@ -64,7 +66,7 @@ pinned-4B majority** over its three runs, not accuracy.
 | SemIf exl3 bridge | Qwen3.8-27B, exl3 5.0bpw | 0.8443 | 121 |
 | **semif-server** ⋯ *this repo* | **Gemma4-12B, Q6_K_XL** | **0.8391** | **125** |
 | SemIf control | Qwen3-Reranker-4B | 0.4157 | 362 |
-| Jev | closed service | — | no public rows for this fixture |
+| Jev (`typesafe/jev-1.13`, live) | closed service | 0.8095 | 148 |
 
 **Batched run**: 777 decisions in **2.4 minutes** — 37 requests × 21 questions,
 each record prefilled once and every question read from the restored prefix
@@ -88,9 +90,13 @@ selection manifest, then scores every row and recomputes the published metrics
 | **semif-server + Gemma4-12B** *(this repo)* | **0.8978** | **0.1400** |
 | published Jev (`typesafe`) | 0.8831 | 0.1268 |
 | SemIf 4B (committed) | 0.8453 | 0.1770 |
+| Jev re-run live *(check)* | 0.8831 | 0.1245 |
 
 The harness reproduces the published Jev and committed-4B numbers exactly
-before reporting ours, so the axis is verified. Reading: on **modal agreement**
+before reporting ours, so the axis is verified. As a further check the Jev rows
+were **re-run live** against the public endpoint: aggregate metrics match the
+published values (0.8831 agreement) and the per-row argmaxes reproduce
+**102/102** of the published outputs. Reading: on **modal agreement**
 this deployment sits between the published Jev point and the frontier models;
 on **TV distance** the published distributions are tighter — a 12B open model
 on a 16 GB card reproduces the public decision patterns, with more
@@ -102,7 +108,9 @@ possible).
 
 ## Operations (same deployment)
 
-- decision latency: **127–144 ms** per decision (typical state + question)
+- decision latency: **127–144 ms** per decision locally · Jev via the public
+  endpoint: p50 **358–380 ms** per call (network included), ~$0.00002–0.00017/call
+  (all Jev rows in this document cost ~$0.085 in total)
 - chat slots: llama.cpp semantics — `SEMIF_CHAT_TOKENS` total ÷ `SEMIF_PARALLEL`
   slots (1×200K or 2×100K both verified on the 16 GB card)
 - vision: the same weights serve image-conditioned decisions **and** image chat
@@ -116,6 +124,7 @@ possible).
 | `shape777_grouped.py` | scores 777 decisions as 37 batched requests (prefix reuse) and computes baseline agreement |
 | `run_typesafe102.py` | scores the rebuilt `typesafe_public_102` fixture and recomputes modal agreement + TV (validates published numbers first) |
 | `probe_ctx_max.py` | pushes chat slots to a target context and reports VRAM headroom/stability |
+| `jev_bench.py` | runs any fixture through Jev (OpenRouter alpha `decisions`) capturing latency/tokens/cost per call |
 
 ## Caveats
 
@@ -128,6 +137,9 @@ possible).
   semantic quality. `authored144` is the semantic axis.
 - `typesafe_public_102` measures **agreement with publicly published outputs**
   on public cases — a reproduction check, not a quality verdict.
+- Jev rows were measured live against the public OpenRouter alpha endpoint
+  (`typesafe/jev-1.13`, 2026-09-28): a moving service — numbers are stamped to
+  that run. The endpoint's published values were reproduced before comparison.
 
 ## Reproduction
 
