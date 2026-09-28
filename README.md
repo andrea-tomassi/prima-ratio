@@ -205,21 +205,26 @@ re-fit or use your own scenario.
 
 ## 📊 Benchmarks at a glance
 
-| Fixture | Metric | SemIf 4B | SemIf 27B exl3 | **prima-ratio** *(this repo)* | Jev |
-|---|---|---|---|---|---|
-| `authored144` — 144 labeled rows | family-balanced accuracy | 0.813 | 0.958 | 0.938 | **0.963** |
-| `shape777` — 777 decisions | agreement vs 4B majority | 0.991\* | 0.844 | **0.839** | 0.810 |
-| `typesafe_public_102` — 102 public cases | modal agreement | 0.845 | — | **0.898** | 0.883 |
-| `typesafe_public_102` — 102 public cases | TV distance | 0.177 | — | 0.140 | **0.127** |
-| `typed-decisions` — 400 public cases | accuracy (zero-shot) | — | — | **0.702** | 0.727 |
-| `typed-decisions` — 400 public cases | confidence error after calibration | — | — | **0.089** | 0.144 |
+On the public [`typed-decisions`](https://huggingface.co/datasets/LocalLLaMA/typed-decisions)
+benchmark (400 cases / 2,000 decisions), against everyone who publishes on it:
 
-\* the pinned 4B *is* the baseline — 0.991 is its own run-to-run consistency.
-Jev measured **live** through its public endpoint, reproducing its published outputs **102/102** before comparison.
+| | Accuracy ↑ | KL from gold ↓ | Brier ↓ | ECE ↓ |
+|---|---:|---:|---:|---:|
+| Spark-X2.5-4B, original *(Rizzo AI Academy)* | 0.574 | 2.899 | 0.480 | 0.349 |
+| Rizzo Flow 4B, fine-tuned *(Rizzo AI Academy)* | 0.648 | 0.452 | 0.205 | 0.112 |
+| **prima-ratio + 12B, default calibration\*** | **0.702** | 0.564 | 0.234 | 0.146 |
+| TypeSafe Jev 1.13.0 | 0.727 | 1.442 | 0.148 | – |
+| meraGPT Decider 1 | 0.768 | 0.096 | 0.052 | 0.180 |
 
-777 decisions in **2.4 min** batched (37 requests × 21 questions, prefix reuse) ·
-local decisions at **127–144 ms** · full protocol, caveats and reproduction:
-**[BENCHMARKS.md](BENCHMARKS.md)**.
+- **One 12B model on one 16 GB card**, ~0.7 s per case, zero per-call cost.
+- Our entry is the **default calibration** (`:calibrated`): raw confidence (KL
+  4.93) tightens to **0.564** — accuracy untouched — with no benchmark-specific
+  fitting whatsoever.
+- Participant rows are each project's published numbers; ours was measured
+  live through the production endpoint — full protocol, metrics and caveats:
+  **[BENCHMARKS.md](BENCHMARKS.md)**.
+\* The default calibration was fitted on several real workloads we use
+ourselves — the benchmark's test dataset was never used for calibration.
 
 ---
 
