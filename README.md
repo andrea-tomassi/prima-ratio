@@ -1,6 +1,6 @@
 # 🌳 semif-server
 
-**Images in, typed decisions out.** A local, single-GPU **System One + Chat
+**Text+Image, typed decision out.** A local, single-GPU **System One + Chat
 Completion endpoint** in a single package: the
 [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) engine ships inside the
 Docker image (pull, run, done) with **one stock model in VRAM** serving
