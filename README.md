@@ -217,6 +217,7 @@ docker pull ghcr.io/andrea-tomassi/semif-server:gguf
 |---|---|
 | `gguf` | **the distribution** — llama.cpp on a local GGUF file, full GPU offload, vision |
 | `latest` | legacy torch build (superseded by `gguf`) |
+| `v0.2.2` | multi-arch CUDA (Turing → Blackwell) + chat context pool ([release notes](https://github.com/andrea-tomassi/semif-server/releases/tag/v0.2.2)) |
 | `v0.2.1` | vision (chat + image-conditioned decisions) + 150K long context ([release notes](https://github.com/andrea-tomassi/semif-server/releases/tag/v0.2.1)) |
 | `v0.2.0` | GGUF distribution + worked calibration example ([release notes](https://github.com/andrea-tomassi/semif-server/releases/tag/v0.2.0)) |
 | `v0.1.0` | first release — System One + chat + automated calibration |
