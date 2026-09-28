@@ -9,15 +9,15 @@ no caption step in between), **typed text decisions** (yes/no, multiple-choice,
 scores) and **normal chat completions**.
 
 Built on [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) (direct option-logit
-readout, MIT). Two image variants, same API: **`:latest`** (transformers, bf16)
-and **`:gguf`** (llama.cpp on a local GGUF file — full GPU offload and vision
-projector support included; this is how a 12B Q6_K_XL with image understanding
-runs smoothly on a 16 GB card).
+readout, MIT). **One distribution: the `:gguf` image** — llama.cpp serving a
+local GGUF checkpoint, full GPU offload and vision projector support included;
+this is how a 12B Q6_K_XL with image understanding runs smoothly on a 16 GB
+card.
 API-compatible with TypeSafe's System One / Jev pattern.
 
 Independent project; not affiliated with TypeSafe, Jev, SemIf or Qwen.
 
-![license](https://img.shields.io/badge/license-MIT-0a0a0a) ![GPU](https://img.shields.io/badge/NVIDIA-≥8GB_VRAM-76b900) ![API](https://img.shields.io/badge/API-System_One_/_OpenAI-0a0a0a)
+![license](https://img.shields.io/badge/license-MIT-0a0a0a) ![GPU](https://img.shields.io/badge/NVIDIA-≥12GB_VRAM-76b900) ![API](https://img.shields.io/badge/API-System_One_/_OpenAI-0a0a0a)
 
 ---
 
@@ -55,16 +55,19 @@ One small service does the things people usually glue together:
 ```bash
 docker run -d --gpus all -p 8000:8000 --restart unless-stopped \
   -v ~/.cache/huggingface:/cache/huggingface \
-  ghcr.io/andrea-tomassi/semif-server:latest
+  -v /path/to/models:/models:ro \
+  -e SEMIF_GGUF=/models/gemma-4-12b-it-UD-Q6_K_XL.gguf \
+  ghcr.io/andrea-tomassi/semif-server:gguf
 curl http://localhost:8000/v1/models
 ```
 
-- ✅ **Requires an NVIDIA GPU** (≥ 8 GB VRAM for the 4B bf16 model) and the
+- ✅ **Requires an NVIDIA GPU** — the reference model (12B Q6_K_XL) runs fully
+  on-GPU in 16 GB — and the
   [NVIDIA container toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
-- ⬇️ Model weights download once to the mounted HF cache on first start (~8 GB) —
-  they are never baked into the image.
-- 🧭 **Other ways to run it** — GGUF variant, vision projector, long contexts,
-  from source, custom CUDA builds: **[RUNNING.md](RUNNING.md)**.
+- 📦 The model arrives as a **local GGUF file** — never baked into the image
+  (the tokenizer downloads once to the mounted HF cache).
+- 🧭 **Other ways to run it** — vision projector, long contexts, from source,
+  custom CUDA builds: **[RUNNING.md](RUNNING.md)**.
 
 ---
 
@@ -92,8 +95,8 @@ output — no visual calibration fitted.)*
 
 ### 🛠️ Use it
 
-On the `:gguf` variant, mount the projector and send the image as a content
-part — chat and decisions both understand it:
+Mount the projector and send the image as a content part — chat and decisions
+both understand it:
 
 ```bash
   -v /path/to/models:/models:ro \
@@ -131,7 +134,7 @@ calibration: [RUNNING.md](RUNNING.md).
 ```bash
 curl http://localhost:8000/v1/systemone -H 'Content-Type: application/json' -d '{
   "state": "Entra ID account record: displayName='"'"'Mario Rossi'"'"', userPrincipalName='"'"'m.rossi@example.com'"'"'.",
-  "model": "semif-qwen3.5-4b",
+  "model": "semif-gemma4-12b",
   "questions": {"account_type": {"type": "choice", "instructions": "Human or service account?",
     "criteria": {"human": "Real person", "service_account": "Non-human identity"}}}
 }'
@@ -172,7 +175,7 @@ curl http://localhost:8000/v1/calibrate -H 'Content-Type: application/json' -d '
 }'
 ```
 
-From that moment `semif-qwen3.5-4b:support-routing` is just another model name:
+From that moment `semif-gemma4-12b:support-routing` is just another model name:
 it shows up in `GET /v1/models` (with its fit numbers) and answers like any
 other. Removing it is one DELETE. The numbers live in
 `build/calibration-manifest.json` — **back that file up**, it is your
@@ -191,9 +194,9 @@ calibration state and is gitignored on purpose.
 - 🔖 A variant is valid for the **exact model revision** it was fitted on —
   after an upgrade, re-calibrate: your labeled examples are the whole cost of
   that.
-- 🔎 With the GGUF variant, scores are **conditional on the quantized weights**
-  (the GGUF checksum is recorded in every response); expect small numeric
-  differences from a bf16 run, not different behaviour.
+- 🔎 Scores are **conditional on the quantized weights** (the GGUF's sha256 is
+  recorded in every response); expect small numeric differences from unquantized
+  runs, not different behaviour.
 
 ---
 
@@ -202,15 +205,15 @@ calibration state and is gitignored on purpose.
 Prebuilt images on ghcr (public):
 
 ```bash
-docker pull ghcr.io/andrea-tomassi/semif-server:latest
+docker pull ghcr.io/andrea-tomassi/semif-server:gguf
 ```
 
 | Tag | Content |
 |---|---|
-| `latest` | latest stable build — torch backend (bf16) |
-| `gguf` | llama.cpp backend — the model as a local GGUF file, full GPU offload, vision |
+| `gguf` | **the distribution** — llama.cpp on a local GGUF file, full GPU offload, vision |
+| `latest` | legacy torch build (superseded by `gguf`) |
 | `v0.2.1` | vision (chat + image-conditioned decisions) + 150K long context ([release notes](https://github.com/andrea-tomassi/semif-server/releases/tag/v0.2.1)) |
-| `v0.2.0` | GGUF variant + worked calibration example ([release notes](https://github.com/andrea-tomassi/semif-server/releases/tag/v0.2.0)) |
+| `v0.2.0` | GGUF distribution + worked calibration example ([release notes](https://github.com/andrea-tomassi/semif-server/releases/tag/v0.2.0)) |
 | `v0.1.0` | first release — System One + chat + automated calibration |
 
 Notes and changelogs: [Releases](https://github.com/andrea-tomassi/semif-server/releases).
@@ -226,17 +229,17 @@ any external exposure.
 
 ## ⚙️ Environment reference
 
-| Variable | Default (`latest` / `gguf`) | Purpose |
+| Variable | Default | Purpose |
 |---|---|---|
-| `SEMIF_BACKEND` | `torch` / `llamacpp` | scoring backend |
-| `SEMIF_GGUF` | — / **required** | path to the local `.gguf` checkpoint |
+| `SEMIF_BACKEND` | `llamacpp` | scoring backend |
+| `SEMIF_GGUF` | **required** | path to the local `.gguf` checkpoint |
 | `SEMIF_MMPROJ` | — | projector `.gguf` — enables vision in chat (base64 data URLs) |
-| `SEMIF_LLAMA_GPU_LAYERS` | `0` / `-1` | llama.cpp offload: `0` CPU, `-1` all layers, `N` first N |
+| `SEMIF_LLAMA_GPU_LAYERS` | `-1` | llama.cpp offload: `0` CPU, `-1` all layers, `N` first N |
 | `SEMIF_KV_TYPE_K` / `SEMIF_KV_TYPE_V` | `f16` | KV cache type — `q8_0` halves KV memory and enables flash attention |
 | `SEMIF_SWA_FULL` | `1` | `0` = window-sized SWA cache: sliding-window layers stop scaling with the context (needed for 100K+ on consumer GPUs) |
 | `SEMIF_PARALLEL` | `1` | chat/vision generation slots — like llama.cpp `--parallel`: N requests run concurrently, each getting total ÷ N context |
 | `SEMIF_CHAT_TOKENS` | `180000` | TOTAL chat/vision context, split across the slots (`total ÷ SEMIF_PARALLEL` per slot, llama.cpp `-c` semantics); requests above the per-slot share are refused with 400 (0 = unlimited) |
-| `SEMIF_MODEL_NAME` | `semif-qwen3.5-4b` / `semif-gemma4-12b` | model-id base for variants |
+| `SEMIF_MODEL_NAME` | `semif-gemma4-12b` | model-id base for variants |
 | `SEMIF_MANIFEST` | `build/calibration-manifest.json` | calibration state file (mount it, back it up) |
 | `SEMIF_MAX_TOKENS` | `4096` | scoring context budget (no truncation — rows that don't fit are refused) |
 
@@ -246,8 +249,8 @@ any external exposure.
 
 - [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) (MIT) — the direct-logit
   scoring method, shared-mode execution and calibration tooling
-- [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) (Apache-2.0) — served by the `:latest` image
-- [gemma-4-12b-it](https://huggingface.co/unsloth/gemma-4-12b-it) (Gemma Terms of Use) — served by the `:gguf` image
+- [gemma-4-12b-it](https://huggingface.co/unsloth/gemma-4-12b-it) (Gemma Terms of Use) — the model served by the image
+- [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) (Apache-2.0) — legacy torch builds
 - [TypeSafe](https://docs.typesafe.ai/api) — the System One API pattern
 
 ---

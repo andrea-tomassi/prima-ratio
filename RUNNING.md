@@ -11,10 +11,10 @@ docker compose up -d          # builds and binds :8000
 curl http://localhost:8000/v1/models
 ```
 
-## 📦 The GGUF variant
+## 📦 The GGUF model file
 
-Same endpoints, same calibration flow; llama.cpp does the forward pass on the
-model's GGUF file (scoring **and** chat share the loaded weights):
+llama.cpp does the forward pass on the model's GGUF file — scoring **and** chat
+share the loaded weights:
 
 ```bash
 docker run -d --gpus all -p 8000:8000 --restart unless-stopped \
@@ -118,8 +118,7 @@ Note: **DGX Spark (GB10) is ARM64** — it needs an `arm64` build of this image
 
 About 200 MB of SASS per architecture; the default multi-arch build takes
 ~40–60 min on 12 cores (cap jobs with `--build-arg BUILD_PARALLEL=8` on
-low-RAM builders). The `:latest` (torch) image ships PyTorch kernels for every
-architecture, so it runs on any NVIDIA GPU out of the box.
+low-RAM builders).
 
 ## ⚙️ Configuration
 
