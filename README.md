@@ -26,30 +26,27 @@ Independent project; not affiliated with TypeSafe, Jev or SemIf.
 
 ---
 
-## 🎯 Why it's comfortable
+## 💪 Strengths
 
-One small service does the things people usually glue together:
-
-- 👁️ **Decisions from images.** Mount the vision projector and the same
-  option-logit readout works on photos: send an image, ask one or more
-  questions, get typed answers with probabilities — **no captioning step in
-  between**. Nine CAPTCHA squares in one request, 2.2 s — and visual workloads
-  calibrate like any other.
-- ⚡ **Typed decisions instead of prompts.** You describe the state and the
-  question; the answer is a choice with probabilities — no answer sentence to
-  parse, no JSON repair, no retry loops. The model never generates tokens:
-  scoring one decision takes about a tenth of a second.
-- 🎚️ **Your own confidence.** Feed it a few dozen labeled examples and it
-  re-calibrates its probabilities on your workload. Confidence you can put a
-  threshold on, with honest out-of-fold numbers to back it.
-- 🏷️ **Model variants without MLOps.** Every calibrated workload becomes a
-  **model variant**: same API, same server, just a different name after a
-  colon. Creating or deleting one is a single HTTP call — no restart, no
-  rebuild, no machine-learning expertise required.
-- 🎁 **Two APIs, one VRAM footprint.** The 16 GB that host the decision engine
-  also serve a full OpenAI-shaped **chat completions** endpoint — same model,
-  same process, zero extra memory. Decisions for your pipelines, a
-  conversational fallback for everything else, in one deployment.
+- 👁️ **Image support, natively.** Send a photo instead of a state string: the
+  same typed decisions work on images, probabilities read straight off the
+  model — **no captioning step in between**. Nine CAPTCHA squares in one
+  request, 2.2 s — and visual workloads calibrate like any other.
+- 🔑 **Turn-the-key System One.** Pull, run, ask: typed decisions with
+  probabilities from the very first call — no prompt engineering, no answer
+  parsing, no JSON repair, no retry loops.
+- 🎚️ **Super easy custom calibration.** A few dozen labeled examples and one
+  HTTP call re-scale the confidence on *your* workload — with honest
+  out-of-fold numbers to back it. No machine-learning expertise required.
+- 🏷️ **Calibrated systems served automatically (MLOps).** Every calibrated
+  workload becomes its own model name at runtime: create, call, and delete
+  variants while the server keeps them all served side by side.
+- 🎁 **System One + chat on one VRAM budget.** The same resident model answers
+  typed decisions *and* OpenAI-shaped chat with tool calling — decisions for
+  your pipelines, conversation for everything else, zero extra memory.
+- 💻 **Low-spec friendly.** Runs on a mainstream 16 GB NVIDIA card — no need
+  for the latest architectures — and eventually on the CPU as well
+  *(roadmap: a 4B engine selected by one flag, for fast and CPU inference)*.
 
 ---
 

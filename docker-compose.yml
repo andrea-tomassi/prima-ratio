@@ -6,8 +6,9 @@ services:
       - "8000:8000"
       - "10000:8000"          # second port kept for the reverse-proxy route
     environment:
-      - PRIMA_GGUF=/models/gemma-4-12b-it-UD-Q6_K_XL.gguf
-      - PRIMA_MMPROJ=/models/mmproj-F16.gguf        # optional: enables vision
+      - PRIMA_ENGINE=12B_VISION                     # default engine
+      # - PRIMA_GGUF=/models/model.gguf             # optional: explicit weights override
+      # - PRIMA_MMPROJ=/models/mmproj-F16.gguf      # optional: explicit projector override
       - PRIMA_LLAMA_GPU_LAYERS=-1
       - PRIMA_MAX_TOKENS=150000                     # scoring context budget
       - PRIMA_KV_TYPE_K=q8_0
@@ -19,9 +20,8 @@ services:
       - HF_HOME=/cache/huggingface
       - PRIMA_MANIFEST=/app/build/calibration-manifest.json
     volumes:
-      - ${HF_CACHE_DIR:-${HOME}/.cache/huggingface}:/cache/huggingface
-      - ./build:/app/build                       # calibration manifest lives here
-      - ${GGUF_DIR:-./models}:/models:ro         # your .gguf + projector
+      - ${PRIMA_CACHE_DIR:-./cache}:/cache          # engine + tokenizer cache (persists downloads)
+      - ./build:/app/build                          # calibration manifest lives here
     deploy:
       resources:
         reservations:

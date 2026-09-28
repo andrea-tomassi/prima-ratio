@@ -1,14 +1,12 @@
 # syntax=docker/dockerfile:1
 # ---------------------------------------------------------------------------
-# prima-ratio — one image: GGUF engine through llama.cpp, decisions + chat +
-# vision on a single GPU. Multi-stage: nvcc only in the builder; the runtime
-# carries the CUDA runtime libraries plus the finished venv. No model is baked
-# into the image — mount your .gguf (and optional vision projector).
+# prima-ratio — one image: decisions + chat + vision on a single GPU.
+# Multi-stage: nvcc only in the builder; the runtime carries the CUDA runtime
+# libraries plus the finished venv. Engine assets are not baked into the image —
+# they download into /cache on first start (mount /cache to keep them).
 #
 #   docker run --gpus all -p 8000:8000 \
-#     -v $HOME/.cache/huggingface:/cache/huggingface \
-#     -v ./build:/app/build -v /path/to/models:/models:ro \
-#     -e PRIMA_GGUF=/models/model.gguf \
+#     -v prima-cache:/cache -v ./build:/app/build \
 #     ghcr.io/andrea-tomassi/prima-ratio:latest
 # ---------------------------------------------------------------------------
 FROM nvidia/cuda:12.9.1-devel-ubuntu22.04 AS builder
@@ -63,5 +61,6 @@ ENV VIRTUAL_ENV=/opt/venv \
     PRIMA_LLAMA_GPU_LAYERS=-1
 
 WORKDIR /app
+RUN mkdir -p /cache/engine /cache/huggingface
 EXPOSE 8000
 CMD ["python", "-m", "prima_ratio"]

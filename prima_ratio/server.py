@@ -41,13 +41,7 @@ from pydantic import BaseModel
 from .engine import llamacpp as engine_backend
 from .engine.prompts import LETTERS, validate_row
 
-MODEL_SOURCE = os.environ.get("PRIMA_MODEL", "unsloth/gemma-4-12b-it")
-REVISION = os.environ.get("PRIMA_REVISION", "55cdba0740a9765956f49501f689a66b098feda3")
-MODEL_BASE = os.environ.get("PRIMA_MODEL_NAME", "prima-ratio-gemma4-12b")
-GGUF_PATH = os.environ.get("PRIMA_GGUF")
-MMPROJ_PATH = os.environ.get("PRIMA_MMPROJ")
 MAX_TOKENS = int(os.environ.get("PRIMA_MAX_TOKENS", "4096"))
-CHAT_MODEL = os.environ.get("PRIMA_CHAT_NAME", MODEL_BASE.removeprefix("prima-ratio-") + "-chat")
 DEFAULT_TRUE = "Yes. The evidence supports an affirmative answer to the question."
 DEFAULT_FALSE = "No. The evidence supports a negative answer to the question."
 MANIFEST_PATH = os.environ.get("PRIMA_MANIFEST", "build/calibration-manifest.json")
@@ -56,8 +50,80 @@ CALIB_SEED = 217
 CALIB_MIN_ROWS_PER_TYPE = 10
 SCENARIO_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*$")
 
-if not GGUF_PATH or not os.path.isfile(GGUF_PATH):
-    raise SystemExit("PRIMA_GGUF must point at a local .gguf file")
+# --- Engines: a named engine loads its assets from the cache folder, downloading
+# them on first start; explicit PRIMA_GGUF / PRIMA_MMPROJ paths always win. -----
+CACHE_DIR = os.environ.get("PRIMA_CACHE", "/cache")
+ENGINE = os.environ.get("PRIMA_ENGINE", "12B_VISION")
+ENGINES = {
+    "12B_VISION": {
+        "repo": "unsloth/gemma-4-12b-it-GGUF",
+        "revision": "fc034cfff751157913579611efad8462ac1be606",
+        "tokenizer": ("unsloth/gemma-4-12b-it", "55cdba0740a9765956f49501f689a66b098feda3"),
+        "gguf": "gemma-4-12b-it-UD-Q6_K_XL.gguf",
+        "gguf_sha256": "70d04059c74be85c5e709921f05acac412b8b8f24f3ee7dd07e91ddc5f4d4de8",
+        "mmproj": "mmproj-F16.gguf",
+        "mmproj_sha256": "91f086971e56d7a7d8d39e271873fccdb49541bd259d6e02c401a4f1cb7a219e",
+    },
+    # Roadmap engines: "12B" (no projector), "4B", "4B_VISION".
+}
+
+
+def _sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for block in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _engine_asset(spec: dict, kind: str, env_override: str, label: str):
+    """Resolve an engine file: explicit env > cache > download from the hub."""
+    explicit = os.environ.get(env_override)
+    if explicit:
+        if not os.path.isfile(explicit):
+            raise SystemExit(f"{env_override} does not point at a file: {explicit}")
+        return explicit
+    filename = spec.get(kind)
+    if not filename:
+        return None
+    target = os.path.join(CACHE_DIR, "engine", filename)
+    if not os.path.isfile(target):
+        print(f"[prima-ratio] {label} not found in the cache — downloading "
+              f"{filename} from {spec['repo']} (first start; this can take a while)...",
+              flush=True)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        try:
+            from huggingface_hub import hf_hub_download
+            hf_hub_download(repo_id=spec["repo"], filename=filename,
+                            revision=spec["revision"],
+                            local_dir=os.path.join(CACHE_DIR, "engine"))
+        except Exception as error:
+            raise SystemExit(f"failed to download {label} ({filename}): {error}") from error
+    expected = spec.get(f"{kind}_sha256")
+    if expected:
+        marker = target + ".verified"
+        verified = os.path.isfile(marker) and open(marker).read().strip() == expected
+        if not verified:
+            actual = _sha256_file(target)
+            if actual != expected:
+                raise SystemExit(f"{label} checksum mismatch: expected {expected[:16]}..., "
+                                 f"got {actual[:16]}... — delete {target} and restart")
+            with open(marker, "w") as handle:
+                handle.write(expected + "\n")
+    return target
+
+
+if ENGINE not in ENGINES:
+    raise SystemExit(f"PRIMA_ENGINE={ENGINE!r} is not available — available engines: "
+                     + ", ".join(sorted(ENGINES)))
+_ENGINE_SPEC = ENGINES[ENGINE]
+MODEL_SOURCE = os.environ.get("PRIMA_MODEL", _ENGINE_SPEC["tokenizer"][0])
+REVISION = os.environ.get("PRIMA_REVISION", _ENGINE_SPEC["tokenizer"][1])
+MODEL_BASE = os.environ.get("PRIMA_MODEL_NAME", "prima-ratio-gemma4-12b")
+CHAT_MODEL = os.environ.get("PRIMA_CHAT_NAME", MODEL_BASE.removeprefix("prima-ratio-") + "-chat")
+GGUF_PATH = _engine_asset(_ENGINE_SPEC, "gguf", "PRIMA_GGUF", "engine weights")
+MMPROJ_PATH = _engine_asset(_ENGINE_SPEC, "mmproj", "PRIMA_MMPROJ", "vision projector")
+
 from pathlib import Path
 
 model, tokenizer, metadata = engine_backend.load_model(
