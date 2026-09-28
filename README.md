@@ -88,6 +88,98 @@ wrong decisions) and records the file's sha256 in every response. GPU offload
 is opt-in through the same llama.cpp semantics you already know: `0` = CPU
 only, `-1` = all layers, `N` = first N layers.
 
+**Long contexts on a small card** — a 150K-token context on a 16 GB GPU, with
+identical decisions to the f16 default (verified) and correct retrieval at 27K
+depth:
+
+```bash
+  -e SEMIF_MAX_TOKENS=150000 \
+  -e SEMIF_KV_TYPE_K=q8_0 -e SEMIF_KV_TYPE_V=q8_0 \
+  -e SEMIF_SWA_FULL=0
+```
+
+`SEMIF_SWA_FULL=0` switches sliding-window layers to a window-sized cache (the
+upstream full-size default makes KV memory grow with the whole context);
+`SEMIF_KV_TYPE_*` halves the remaining KV and enables flash attention.
+
+**Vision** — mount the projector and chat understands images:
+
+```bash
+  -v /path/to/models:/models:ro \
+  -e SEMIF_MMPROJ=/models/mmproj-F16.gguf
+```
+
+Then send OpenAI-style content parts with base64 data URLs:
+
+```json
+{"messages": [{"role": "user", "content": [
+  {"type": "text", "text": "What does the image say?"},
+  {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}]}]}
+```
+
+`GET /v1/models` reports `"vision": true` on the chat entry when the projector
+is loaded.
+
+The same images work in **decisions** (GGUF backend only): give `state` as
+content parts and the option logits are read **conditioned on the image** — no
+caption step in between:
+
+```json
+{"state": [{"type": "text", "text": "Inspect the receipt."},
+           {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}],
+ "model": "semif-gemma4-12b",
+ "questions": {"over": {"type": "choice", "instructions": "Is the total over 100?",
+                          "criteria": {"yes": "over 100", "no": "not over 100"}}}}
+```
+
+Multiple questions in one request share the image. Calibration works the same
+way: labeled rows with image states fit a temperature for the visual workload.
+
+#### 👁️ Demo — nine questions, one image, one request
+
+A reCAPTCHA-style challenge (*select all images with traffic lights*), nine
+labeled squares, all nine questions in a single request — the image is encoded
+once and every option logit is read against it:
+
+| square | P(traffic light) | what it is |
+|---|---|---|
+| 2 | **0.98** | clear green signal |
+| 5 | **0.96** | signals on the overhead arm |
+| 8 | **0.79** | hanging yellow signal housing |
+| 3 | 0.38 | bicycle + pole — the ambiguous one |
+| 1 | 0.13 | signs and poles |
+| 4 · 6 · 7 · 9 | 0.001 | clean negatives |
+
+**9/9 against the visual ground truth, 2.2 s for all nine questions.** The
+confidence behaves like a human's: sharp where the signal is obvious, hesitant
+exactly where a person squints, rock-solid on clean negatives. *(Raw model
+output — no visual calibration fitted.)*
+
+![traffic lights captcha demo](assets/vision-traffic-lights.png)
+
+**Which GPUs?** The GGUF image compiles llama.cpp's CUDA kernels for **sm_89
+(Ada / RTX 40-series)** by default — the measured-fastest build for the
+deployment it was made for. On a different architecture the service still
+starts, but the CUDA backend cannot initialise and llama.cpp falls back to CPU;
+rebuild for your GPU (one build arg, ~10–25 min):
+
+```bash
+docker build -f Dockerfile.gguf --build-arg CUDA_ARCHS=86 -t my/semif-server:gguf .
+```
+
+| GPU family | `CUDA_ARCHS` |
+|---|---|
+| RTX 40 / L4 (Ada) | `89` — the default |
+| RTX 30 / A10 (Ampere) | `86` |
+| RTX 20 / T4 (Turing) | `75` |
+| A100 | `80` |
+| H100 | `90` |
+| mixed fleet | `"86;89"` (semicolon list) |
+| maximum portability | `all-major` (long build, ~+1 GB of SASS) |
+
+The `:latest` (torch) image ships PyTorch kernels for every architecture, so it
+runs on any NVIDIA GPU out of the box.
+
 ---
 
 ## 🔌 Endpoints
@@ -186,6 +278,7 @@ docker pull ghcr.io/andrea-tomassi/semif-server:latest
 |---|---|
 | `latest` | latest stable build — torch backend, Qwen3.5-4B bf16 |
 | `gguf` | llama.cpp backend — any local `.gguf`, opt-in full GPU offload |
+| `v0.2.1` | vision (chat + image-conditioned decisions) + 150K long context ([release notes](https://github.com/andrea-tomassi/semif-server/releases/tag/v0.2.1)) |
 | `v0.2.0` | GGUF variant + worked calibration example ([release notes](https://github.com/andrea-tomassi/semif-server/releases/tag/v0.2.0)) |
 | `v0.1.0` | first release — System One + chat + automated calibration |
 
@@ -206,7 +299,10 @@ any external exposure.
 |---|---|---|
 | `SEMIF_BACKEND` | `torch` / `llamacpp` | scoring backend |
 | `SEMIF_GGUF` | — / **required** | path to the local `.gguf` checkpoint |
+| `SEMIF_MMPROJ` | — | projector `.gguf` — enables vision in chat (base64 data URLs) |
 | `SEMIF_LLAMA_GPU_LAYERS` | `0` / `-1` | llama.cpp offload: `0` CPU, `-1` all layers, `N` first N |
+| `SEMIF_KV_TYPE_K` / `SEMIF_KV_TYPE_V` | `f16` | KV cache type — `q8_0` halves KV memory and enables flash attention |
+| `SEMIF_SWA_FULL` | `1` | `0` = window-sized SWA cache: sliding-window layers stop scaling with the context (needed for 100K+ on consumer GPUs) |
 | `SEMIF_MODEL` | `Qwen/Qwen3.5-4B` / `unsloth/gemma-4-12b-it` | HF tokenizer source (template + provenance) |
 | `SEMIF_REVISION` | pinned per model | revision recorded in variant fingerprints |
 | `SEMIF_MODEL_NAME` | `semif-qwen3.5-4b` / `semif-gemma4-12b` | public model-id base for variants |
