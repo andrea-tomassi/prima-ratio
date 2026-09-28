@@ -1,0 +1,11 @@
+.git
+.github
+build/
+benchmarks/
+assets/
+calibration/
+*.md
+!README.md
+__pycache__/
+*.pyc
+.venv/

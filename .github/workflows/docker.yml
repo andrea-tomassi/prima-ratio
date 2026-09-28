@@ -1,0 +1,71 @@
+name: docker
+
+on:
+  push:
+    tags: ["v*"]          # create a tag -> build + push to ghcr
+  workflow_dispatch: {}   # manual run -> pushes :edge (test builds)
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile check
+        run: python3 -m compileall -q prima_ratio
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=edge,enable=${{ github.event_name == 'workflow_dispatch' }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_PARALLEL=4
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # arm64 image for DGX Spark (GB10, sm_121) — enable after a native test:
+  # the arm64 CUDA base images exist, but the llama.cpp CUDA build on Grace
+  # needs verification. Uncomment to build/push :latest-arm64 on tags.
+  #
+  # build-arm64:
+  #   runs-on: ubuntu-24.04-arm
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: docker/setup-buildx-action@v3
+  #     - uses: docker/login-action@v3
+  #       with:
+  #         registry: ghcr.io
+  #         username: ${{ github.actor }}
+  #         password: ${{ secrets.GITHUB_TOKEN }}
+  #     - uses: docker/build-push-action@v6
+  #       with:
+  #         context: .
+  #         push: true
+  #         platforms: linux/arm64
+  #         tags: ghcr.io/${{ github.repository }}:latest-arm64
+  #         build-args: |
+  #           CUDA_ARCHS=121
+  #           BUILD_PARALLEL=4
