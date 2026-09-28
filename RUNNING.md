@@ -67,8 +67,10 @@ The captcha demo in the [README](README.md) shows it end to end.
 
 ## 🧠 Long contexts on a small card
 
-A 150K-token context fits on a 16 GB GPU with the same quality of decisions
-(verified, retrieval correct at 27K depth). The settings:
+The context is configurable — `SEMIF_MAX_TOKENS` for decisions,
+`SEMIF_CHAT_TOKENS` for chat. A 150K-token scoring context fits a 16 GB GPU
+alongside the chat slots and vision (verified; retrieval correct at 27K
+depth). The settings for that reference point:
 
 ```bash
   -e SEMIF_MAX_TOKENS=150000 \
@@ -79,6 +81,16 @@ A 150K-token context fits on a 16 GB GPU with the same quality of decisions
 `SEMIF_SWA_FULL=0` switches sliding-window layers to a window-sized cache (the
 upstream full-size default makes KV memory grow with the whole context);
 `SEMIF_KV_TYPE_*` halves the remaining KV and enables flash attention.
+
+## 🔀 Concurrency
+
+`SEMIF_PARALLEL` (default `1`) sets how many chat/vision generations run at
+once on the shared weights — llama.cpp `--parallel` semantics. The total chat
+context (`SEMIF_CHAT_TOKENS`, default 180K) is split evenly across the slots:
+one slot gets the whole budget, two slots get half each. A request that
+exceeds its slot's share is refused with a **400 that explains the budget**
+(never silently truncated). Decisions are single 130 ms forwards and stay
+serialized; vision generation queues behind the projector.
 
 ## 🏗️ Which GPUs? — custom CUDA builds
 

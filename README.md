@@ -90,6 +90,28 @@ output — no visual calibration fitted.)*
 
 ![traffic lights captcha demo](assets/vision-traffic-lights.png)
 
+### 🛠️ Use it
+
+On the `:gguf` variant, mount the projector and send the image as a content
+part — chat and decisions both understand it:
+
+```bash
+  -v /path/to/models:/models:ro \
+  -e SEMIF_MMPROJ=/models/mmproj-F16.gguf
+```
+
+```json
+{"state": [{"type": "text", "text": "Inspect the receipt."},
+           {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}],
+ "model": "semif-gemma4-12b",
+ "questions": {"over": {"type": "choice", "instructions": "Is the total over 100?",
+                          "criteria": {"yes": "over 100", "no": "not over 100"}}}}
+```
+
+The option logits are read **conditioned on the image** — no caption step in
+between. Chat content parts, multiple questions per image and visual-workload
+calibration: [RUNNING.md](RUNNING.md).
+
 ---
 
 ## 🔌 Endpoints
@@ -212,6 +234,8 @@ any external exposure.
 | `SEMIF_LLAMA_GPU_LAYERS` | `0` / `-1` | llama.cpp offload: `0` CPU, `-1` all layers, `N` first N |
 | `SEMIF_KV_TYPE_K` / `SEMIF_KV_TYPE_V` | `f16` | KV cache type — `q8_0` halves KV memory and enables flash attention |
 | `SEMIF_SWA_FULL` | `1` | `0` = window-sized SWA cache: sliding-window layers stop scaling with the context (needed for 100K+ on consumer GPUs) |
+| `SEMIF_PARALLEL` | `1` | chat/vision generation slots — like llama.cpp `--parallel`: N requests run concurrently, each getting total ÷ N context |
+| `SEMIF_CHAT_TOKENS` | `180000` | TOTAL chat/vision context, split across the slots (`total ÷ SEMIF_PARALLEL` per slot, llama.cpp `-c` semantics); requests above the per-slot share are refused with 400 (0 = unlimited) |
 | `SEMIF_MODEL_NAME` | `semif-qwen3.5-4b` / `semif-gemma4-12b` | model-id base for variants |
 | `SEMIF_MANIFEST` | `build/calibration-manifest.json` | calibration state file (mount it, back it up) |
 | `SEMIF_MAX_TOKENS` | `4096` | scoring context budget (no truncation — rows that don't fit are refused) |
