@@ -160,6 +160,14 @@ your examples, measures how far the model's confidence is from your labels,
 computes the correction, validates it on data it hasn't seen, and publishes the
 result. **One call, no restart, no machine-learning knowledge.**
 
+**How the correction is chosen — NLL fits, ECE decides.** The server computes
+the correction with **NLL** (a "surprise score": how unlikely the model found
+the right answers — lower is better), then judges it with **ECE** on rows kept
+aside: *when the model says 90%, is it right 90% of the time?* — the metric
+that makes thresholds trustworthy. Only a correction that improves ECE ships;
+if your model is already honest on the workload, the variant still exists
+(same name, neutral correction) — no special fallbacks to remember.
+
 ```bash
 curl http://localhost:8000/v1/calibrate -H 'Content-Type: application/json' -d '{
   "scenario": "support-routing",
