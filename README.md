@@ -1,18 +1,19 @@
 # 🌳 semif-server
 
-**Text+Image, typed decision out.** A local, single-GPU **System One + Chat
-Completion endpoint** in a single package: the
-[SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) engine ships inside the
-Docker image (pull, run, done) with **one stock model in VRAM** serving
-**image-conditioned decisions** (option logits read straight off the model —
-no caption step in between), **typed text decisions** (yes/no, multiple-choice,
-scores) and **normal chat completions**.
+**Text + images in. Text + typed decisions out.**
 
-Built on [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) (direct option-logit
-readout, MIT). **One distribution: the `:gguf` image** — llama.cpp serving a
-local GGUF checkpoint, full GPU offload and vision projector support included;
-this is how a 12B Q6_K_XL with image understanding runs smoothly on a 16 GB
-card.
+A multimodal **System One** on a single GPU: point it at a message, a record,
+or a photo, ask your questions, and read the answers as **typed decisions with
+probabilities** — scored straight off the model's logits. No generation, no
+parsing, no captioning. Confidence you can classify, verify and gate on.
+
+It ships as **one Docker image, one model in VRAM**: the
+[SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) engine (direct option-logit
+readout, MIT) inside, serving **image-conditioned decisions**, **typed text
+decisions** (yes/no, multiple-choice, scores) and **normal chat completions**
+on the same weights. **One distribution: the `:gguf` image** — llama.cpp on a
+local GGUF file with full GPU offload and vision projector support (this is how
+a 12B Q6_K_XL with image understanding runs smoothly on a 16 GB card).
 API-compatible with TypeSafe's System One / Jev pattern.
 
 Independent project; not affiliated with TypeSafe, Jev, SemIf or Qwen.
