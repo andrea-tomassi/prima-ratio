@@ -1,0 +1,16 @@
+prima-ratio
+Copyright (c) 2026 Andrea Tomassi
+
+This product includes software adapted from SemIf
+(https://github.com/TheoLeeCJ/SemIf-OpenJev), MIT licence,
+commit 23cf1f39fc9534fe81437200959b6dfc7106e45a.
+
+The vendored modules under prima_ratio/engine/ (prompts, encoding, prefix,
+llamacpp) implement SemIf's direct option-logit decision method: prompt
+contract, single-token answer-slot verification, shared-state prefix reuse and
+the llama.cpp scoring backend. Divergences from upstream (Torch/MLX paths
+removed; opt-in GPU offload, KV-cache type and window-sized SWA cache;
+chat/vision/calibration layers) are listed in VENDORED.md.
+
+prima-ratio is an independent project, not affiliated with or endorsed by
+SemIf, TypeSafe or Jev.

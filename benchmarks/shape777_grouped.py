@@ -28,7 +28,7 @@ for gi, (state, group) in enumerate(groups.items(), 1):
     with urllib.request.urlopen(req, timeout=600) as resp:
         d = json.loads(resp.read())
     times.append(time.perf_counter() - t)
-    modes[d["x_semif"]["score_mode"]] += 1
+    modes[d["x_prima"]["score_mode"]] += 1
     for qid, a in d["answers"].items():
         answers[qid] = {"choice": a["choice"], "probabilities": a["probabilities"]}
     if gi % 10 == 0:

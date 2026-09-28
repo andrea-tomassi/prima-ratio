@@ -1,10 +1,8 @@
-# vendored patch of SemIf <pin>/src/semif_phase1/llamacpp_backend.py
-# (TheoLeeCJ/SemIf-OpenJev @ 23cf1f39fc9534fe81437200959b6dfc7106e45a) with three
-# additive, env-gated changes — upstream defaults are unchanged:
-#   1. SEMIF_LLAMA_GPU_LAYERS   opt-in GPU offload (0 CPU / -1 all / N first N)
-#   2. SEMIF_KV_TYPE_K/_V       quantized KV cache (e.g. q8_0) + auto flash-attn
-#   3. SEMIF_SWA_FULL=0         window-sized SWA cache (long-context memory)
-# Bump the pin deliberately: re-apply the patch and re-run the long-context test.
+# Vendored from SemIf (https://github.com/TheoLeeCJ/SemIf-OpenJev), MIT licence,
+# commit 23cf1f39fc9534fe81437200959b6dfc7106e45a — adapted for prima-ratio.
+# Divergences (see VENDORED.md): opt-in GPU offload, KV cache type and
+# window-sized SWA cache are first-class, env-gated options (PRIMA_LLAMA_GPU_LAYERS,
+# PRIMA_KV_TYPE_K/_V, PRIMA_SWA_FULL); everything else is upstream behaviour.
 """CPU option readout over GGUF checkpoints through llama.cpp.
 
 Prompt construction and answer-slot verification stay on the reference
@@ -33,9 +31,9 @@ import weakref
 
 import numpy
 
-from .core import LETTERS, direct_messages, softmax
-from .direct import PROMPT_VERSION, encode_prompt
-from .shared import _state_prefix
+from .prompts import LETTERS, direct_messages, softmax
+from .encoding import PROMPT_VERSION, encode_prompt
+from .prefix import _state_prefix
 
 DECODE_CHUNK = 512
 _BACKEND_INITIALIZED = False
@@ -44,7 +42,7 @@ _BACKEND_INITIALIZED = False
 def _model_params(library):
     """Initialize llama.cpp once and return model parameters.
 
-    GPU offload is opt-in via SEMIF_LLAMA_GPU_LAYERS (llama.cpp n_gpu_layers
+    GPU offload is opt-in via PRIMA_LLAMA_GPU_LAYERS (llama.cpp n_gpu_layers
     semantics: 0 = CPU only, -1 = all layers on GPU, N = first N layers).
     """
     global _BACKEND_INITIALIZED
@@ -52,7 +50,7 @@ def _model_params(library):
         library.llama_backend_init()
         _BACKEND_INITIALIZED = True
     params = library.llama_model_default_params()
-    params.n_gpu_layers = int(os.environ.get("SEMIF_LLAMA_GPU_LAYERS", "0"))
+    params.n_gpu_layers = int(os.environ.get("PRIMA_LLAMA_GPU_LAYERS", "0"))
     return params
 
 
@@ -90,10 +88,10 @@ def _logsumexp(values: numpy.ndarray) -> float:
 def _apply_context_env(library, params) -> None:
     """Deployment knobs for long contexts (all optional, env-driven):
 
-    SEMIF_KV_TYPE_K / SEMIF_KV_TYPE_V  llama.cpp KV cache types (e.g. q8_0):
+    PRIMA_KV_TYPE_K / PRIMA_KV_TYPE_V  llama.cpp KV cache types (e.g. q8_0):
         halves KV memory; flash attention is enabled automatically because
         quantized V requires it.
-    SEMIF_SWA_FULL=0                   window-sized SWA cache instead of the
+    PRIMA_SWA_FULL=0                   window-sized SWA cache instead of the
         full-size default: sliding-window layers stop scaling with n_ctx
         (this is what makes >32K contexts fit on a 16 GB card).
     """
@@ -103,13 +101,13 @@ def _apply_context_env(library, params) -> None:
             return None
         return getattr(library, "GGML_TYPE_" + value.upper(), None)
 
-    key_type = _cache_type("SEMIF_KV_TYPE_K")
-    value_type = _cache_type("SEMIF_KV_TYPE_V")
+    key_type = _cache_type("PRIMA_KV_TYPE_K")
+    value_type = _cache_type("PRIMA_KV_TYPE_V")
     if key_type is not None:
         params.type_k = key_type
     if value_type is not None:
         params.type_v = value_type
-    swa_full = os.environ.get("SEMIF_SWA_FULL", "").strip().lower()
+    swa_full = os.environ.get("PRIMA_SWA_FULL", "").strip().lower()
     if swa_full and hasattr(params, "swa_full"):
         params.swa_full = swa_full not in {"0", "false", "no"}
     if (key_type is not None or value_type is not None) and hasattr(params, "flash_attn_type"):
@@ -304,10 +302,10 @@ def load_model(source: str, revision: str, gguf, *, threads: int | None = None,
         "gguf": gguf_record,
         "vocab_size": engine.vocab_size,
         "threads": threads,
-        "n_gpu_layers": int(os.environ.get("SEMIF_LLAMA_GPU_LAYERS", "0")),
-        "kv_type_k": os.environ.get("SEMIF_KV_TYPE_K", "f16"),
-        "kv_type_v": os.environ.get("SEMIF_KV_TYPE_V", "f16"),
-        "swa_full": os.environ.get("SEMIF_SWA_FULL", "1"),
+        "n_gpu_layers": int(os.environ.get("PRIMA_LLAMA_GPU_LAYERS", "0")),
+        "kv_type_k": os.environ.get("PRIMA_KV_TYPE_K", "f16"),
+        "kv_type_v": os.environ.get("PRIMA_KV_TYPE_V", "f16"),
+        "swa_full": os.environ.get("PRIMA_SWA_FULL", "1"),
         "max_prompt_tokens": context_tokens,
         "context_tokens": engine.context_tokens,
         "decode_chunk": DECODE_CHUNK,

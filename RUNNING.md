@@ -1,4 +1,4 @@
-# 🧭 Other ways to run semif-server
+# 🧭 Other ways to run prima-ratio
 
 The [Quick Start](README.md) is the base way: one `docker run`, done.
 This file collects everything else.
@@ -6,7 +6,7 @@ This file collects everything else.
 ## 🔧 From source
 
 ```bash
-git clone https://github.com/andrea-tomassi/semif-server && cd semif-server
+git clone https://github.com/andrea-tomassi/prima-ratio && cd prima-ratio
 docker compose up -d          # builds and binds :8000
 curl http://localhost:8000/v1/models
 ```
@@ -20,14 +20,14 @@ share the loaded weights:
 docker run -d --gpus all -p 8000:8000 --restart unless-stopped \
   -v ~/.cache/huggingface:/cache/huggingface \
   -v /path/to/models:/models:ro \
-  -e SEMIF_GGUF=/models/gemma-4-12b-it-UD-Q6_K_XL.gguf \
-  ghcr.io/andrea-tomassi/semif-server:gguf
+  -e PRIMA_GGUF=/models/gemma-4-12b-it-UD-Q6_K_XL.gguf \
+  ghcr.io/andrea-tomassi/prima-ratio:latest
 ```
 
 At startup the image verifies that the mounted checkpoint is the expected
 model — a mismatch stops the server instead of serving quietly wrong
 decisions. Full GPU offload is already the default; set
-`SEMIF_LLAMA_GPU_LAYERS=0` for CPU-only runs.
+`PRIMA_LLAMA_GPU_LAYERS=0` for CPU-only runs.
 
 ## 👁️ Vision — images in chat and decisions
 
@@ -35,7 +35,7 @@ Mount the projector:
 
 ```bash
   -v /path/to/models:/models:ro \
-  -e SEMIF_MMPROJ=/models/mmproj-F16.gguf
+  -e PRIMA_MMPROJ=/models/mmproj-F16.gguf
 ```
 
 Chat understands images through OpenAI-style content parts (base64 data URLs):
@@ -56,7 +56,7 @@ caption step in between:
 ```json
 {"state": [{"type": "text", "text": "Inspect the receipt."},
            {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}],
- "model": "semif-gemma4-12b",
+ "model": "prima-ratio-gemma4-12b",
  "questions": {"over": {"type": "choice", "instructions": "Is the total over 100?",
                           "criteria": {"yes": "over 100", "no": "not over 100"}}}}
 ```
@@ -67,26 +67,26 @@ The captcha demo in the [README](README.md) shows it end to end.
 
 ## 🧠 Long contexts on a small card
 
-The context is configurable — `SEMIF_MAX_TOKENS` for decisions,
-`SEMIF_CHAT_TOKENS` for chat. A 150K-token scoring context fits a 16 GB GPU
+The context is configurable — `PRIMA_MAX_TOKENS` for decisions,
+`PRIMA_CHAT_TOKENS` for chat. A 150K-token scoring context fits a 16 GB GPU
 alongside the chat slots and vision (verified; retrieval correct at 27K
 depth). The settings for that reference point:
 
 ```bash
-  -e SEMIF_MAX_TOKENS=150000 \
-  -e SEMIF_KV_TYPE_K=q8_0 -e SEMIF_KV_TYPE_V=q8_0 \
-  -e SEMIF_SWA_FULL=0
+  -e PRIMA_MAX_TOKENS=150000 \
+  -e PRIMA_KV_TYPE_K=q8_0 -e PRIMA_KV_TYPE_V=q8_0 \
+  -e PRIMA_SWA_FULL=0
 ```
 
-`SEMIF_SWA_FULL=0` switches sliding-window layers to a window-sized cache (the
+`PRIMA_SWA_FULL=0` switches sliding-window layers to a window-sized cache (the
 upstream full-size default makes KV memory grow with the whole context);
-`SEMIF_KV_TYPE_*` halves the remaining KV and enables flash attention.
+`PRIMA_KV_TYPE_*` halves the remaining KV and enables flash attention.
 
 ## 🔀 Concurrency
 
-`SEMIF_PARALLEL` (default `1`) sets how many chat/vision generations run at
+`PRIMA_PARALLEL` (default `1`) sets how many chat/vision generations run at
 once on the shared weights — llama.cpp `--parallel` semantics. The total chat
-context (`SEMIF_CHAT_TOKENS`, default 180K) is split evenly across the slots:
+context (`PRIMA_CHAT_TOKENS`, default 180K) is split evenly across the slots:
 one slot gets the whole budget, two slots get half each. A request that
 exceeds its slot's share is refused with a **400 that explains the budget**
 (never silently truncated). Decisions are single 130 ms forwards and stay
@@ -101,7 +101,7 @@ a narrower list for a faster build and a smaller image, or extend it for other
 targets:
 
 ```bash
-docker build -f Dockerfile.gguf --build-arg CUDA_ARCHS="86;89" -t my/semif-server:gguf .
+docker build -f Dockerfile --build-arg CUDA_ARCHS="86;89" -t my/prima-ratio:latest .
 ```
 
 | GPU family | `CUDA_ARCHS` |

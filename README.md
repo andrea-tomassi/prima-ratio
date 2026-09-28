@@ -1,4 +1,4 @@
-# 🌳 semif-server
+# 🌳 prima-ratio
 
 **Text or images in. Text or typed decisions out.**
 
@@ -15,9 +15,9 @@ It ships as **one Docker image, one model in VRAM**: the
 [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) engine (direct option-logit
 readout, MIT) inside, serving **image-conditioned decisions**, **typed text
 decisions** (yes/no, multiple-choice, scores) and **normal chat completions**
-on the same weights. **One distribution: the `:gguf` image** — llama.cpp on a
-local GGUF file with full GPU offload and vision projector support (this is how
-a 12B Q6_K_XL with image understanding runs smoothly on a 16 GB card).
+on the same weights. **One image**: llama.cpp on a local GGUF file with full
+GPU offload and vision projector support (this is how a 12B Q6_K_XL with image
+understanding runs smoothly on a 16 GB card).
 API-compatible with TypeSafe's System One / Jev pattern.
 
 Independent project; not affiliated with TypeSafe, Jev or SemIf.
@@ -61,8 +61,8 @@ One small service does the things people usually glue together:
 docker run -d --gpus all -p 8000:8000 --restart unless-stopped \
   -v ~/.cache/huggingface:/cache/huggingface \
   -v /path/to/models:/models:ro \
-  -e SEMIF_GGUF=/models/gemma-4-12b-it-UD-Q6_K_XL.gguf \
-  ghcr.io/andrea-tomassi/semif-server:gguf
+  -e PRIMA_GGUF=/models/gemma-4-12b-it-UD-Q6_K_XL.gguf \
+  ghcr.io/andrea-tomassi/prima-ratio:latest
 curl http://localhost:8000/v1/models
 ```
 
@@ -105,13 +105,13 @@ both understand it:
 
 ```bash
   -v /path/to/models:/models:ro \
-  -e SEMIF_MMPROJ=/models/mmproj-F16.gguf
+  -e PRIMA_MMPROJ=/models/mmproj-F16.gguf
 ```
 
 ```json
 {"state": [{"type": "text", "text": "Inspect the receipt."},
            {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}],
- "model": "semif-gemma4-12b",
+ "model": "prima-ratio-gemma4-12b",
  "questions": {"over": {"type": "choice", "instructions": "Is the total over 100?",
                           "criteria": {"yes": "over 100", "no": "not over 100"}}}}
 ```
@@ -139,7 +139,7 @@ calibration: [RUNNING.md](RUNNING.md).
 ```bash
 curl http://localhost:8000/v1/systemone -H 'Content-Type: application/json' -d '{
   "state": "Entra ID account record: displayName='"'"'Mario Rossi'"'"', userPrincipalName='"'"'m.rossi@example.com'"'"'.",
-  "model": "semif-gemma4-12b",
+  "model": "prima-ratio-gemma4-12b",
   "questions": {"account_type": {"type": "choice", "instructions": "Human or service account?",
     "criteria": {"human": "Real person", "service_account": "Non-human identity"}}}
 }'
@@ -180,7 +180,7 @@ curl http://localhost:8000/v1/calibrate -H 'Content-Type: application/json' -d '
 }'
 ```
 
-From that moment `semif-gemma4-12b:support-routing` is just another model name:
+From that moment `prima-ratio-gemma4-12b:support-routing` is just another model name:
 it shows up in `GET /v1/models` (with its fit numbers) and answers like any
 other. Removing it is one DELETE. The numbers live in
 `build/calibration-manifest.json` — **back that file up**, it is your
@@ -191,18 +191,18 @@ calibration state and is gitignored on purpose.
 > Mermaid diagram render?* — including how the labels were verified with a
 > headless-browser render oracle and the held-out numbers against Jev.
 
-### Out of the box: raw → generic → yours
+### Out of the box: calibrated → yours → uncalibrated (if you insist)
 
 Three confidence levels, no setup required to get started:
 
 | Model id | Temperature | What it is |
 |---|---|---|
-| `semif-gemma4-12b` / `:vanilla` | 1.0 | raw option logits — uncalibrated, systematically overconfident |
-| **`:generic`** | **3.4** | a **generic temperature fitted across mixed workloads and validated held-out: it improves NLL *and* ECE on every tested workload, none worsens** — the sane default when you have no labels yet |
-| `:your-scenario` | fitted | calibrated on **your** labeled examples (30–60 are plenty) — refines the generic default on your workload |
+| **`:calibrated`** | **3.4** | the built-in default for decisions: **one temperature fitted across mixed workloads and validated held-out — it improves NLL *and* ECE on every tested workload, none worsens** |
+| `:your-scenario` | fitted | calibrated on **your** labeled examples (30–60 are plenty) — refines the built-in on your workload |
+| `:uncalibrated` | 1.0 | raw option logits — systematically overconfident, **not recommended for decisions** |
 
-The generic value is model-bound (refit if the base model changes) and tunable
-via `SEMIF_GENERIC_TEMPERATURE`.
+The built-in value is model-bound (refit if the base model changes) and tunable
+via `PRIMA_CALIBRATED_TEMPERATURE`.
 
 ### ⚠️ Three honest caveats
 
@@ -244,19 +244,20 @@ local decisions at **127–144 ms** · full protocol, caveats and reproduction:
 Prebuilt images on ghcr (public):
 
 ```bash
-docker pull ghcr.io/andrea-tomassi/semif-server:gguf
+docker pull ghcr.io/andrea-tomassi/prima-ratio:latest
 ```
 
 | Tag | Content |
 |---|---|
-| `gguf` | **the distribution** — llama.cpp on a local GGUF file, full GPU offload, vision |
-| `latest` | legacy torch build (superseded by `gguf`) |
-| `v0.2.2` | multi-arch CUDA (Turing → Blackwell) + chat context pool ([release notes](https://github.com/andrea-tomassi/semif-server/releases/tag/v0.2.2)) |
-| `v0.2.1` | vision (chat + image-conditioned decisions) + 150K long context ([release notes](https://github.com/andrea-tomassi/semif-server/releases/tag/v0.2.1)) |
-| `v0.2.0` | GGUF distribution + worked calibration example ([release notes](https://github.com/andrea-tomassi/semif-server/releases/tag/v0.2.0)) |
+| **`latest`** | **the single image** — GGUF engine, full GPU offload, vision (decisions + chat) |
+| *legacy* `:gguf` / old `:latest` | historical tags (pre-0.3.0): the GGUF build and the retired Torch build |
+| `v0.3.0` | **prima-ratio**: vendored engine (no upstream clone, no Torch), renamed built-ins (`:calibrated` / `:uncalibrated`) |
+| `v0.2.2` | multi-arch CUDA (Turing → Blackwell) + chat context pool ([release notes](https://github.com/andrea-tomassi/prima-ratio/releases/tag/v0.2.2)) |
+| `v0.2.1` | vision (chat + image-conditioned decisions) + 150K long context ([release notes](https://github.com/andrea-tomassi/prima-ratio/releases/tag/v0.2.1)) |
+| `v0.2.0` | GGUF distribution + worked calibration example ([release notes](https://github.com/andrea-tomassi/prima-ratio/releases/tag/v0.2.0)) |
 | `v0.1.0` | first release — System One + chat + automated calibration |
 
-Notes and changelogs: [Releases](https://github.com/andrea-tomassi/semif-server/releases).
+Notes and changelogs: [Releases](https://github.com/andrea-tomassi/prima-ratio/releases).
 Benchmark comparisons (SemIf 4B / 27B exl3 / Jev): [BENCHMARKS.md](BENCHMARKS.md).
 
 ---
@@ -279,18 +280,18 @@ any external exposure.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `SEMIF_BACKEND` | `llamacpp` | scoring backend |
-| `SEMIF_GGUF` | **required** | path to the local `.gguf` checkpoint |
-| `SEMIF_MMPROJ` | — | projector `.gguf` — enables vision in chat (base64 data URLs) |
-| `SEMIF_LLAMA_GPU_LAYERS` | `-1` | llama.cpp offload: `0` CPU, `-1` all layers, `N` first N |
-| `SEMIF_KV_TYPE_K` / `SEMIF_KV_TYPE_V` | `f16` | KV cache type — `q8_0` halves KV memory and enables flash attention |
-| `SEMIF_SWA_FULL` | `1` | `0` = window-sized SWA cache: sliding-window layers stop scaling with the context (needed for 100K+ on consumer GPUs) |
-| `SEMIF_PARALLEL` | `1` | chat/vision generation slots — like llama.cpp `--parallel`: N requests run concurrently, each getting total ÷ N context |
-| `SEMIF_GENERIC_TEMPERATURE` | `3.4` | built-in `:generic` scenario temperature (fitted across mixed workloads, validated held-out) |
-| `SEMIF_CHAT_TOKENS` | `180000` | TOTAL chat/vision context, split across the slots (`total ÷ SEMIF_PARALLEL` per slot, llama.cpp `-c` semantics); requests above the per-slot share are refused with 400 (0 = unlimited) |
-| `SEMIF_MODEL_NAME` | `semif-gemma4-12b` | model-id base for variants |
-| `SEMIF_MANIFEST` | `build/calibration-manifest.json` | calibration state file (mount it, back it up) |
-| `SEMIF_MAX_TOKENS` | `4096` | scoring context budget (no truncation — rows that don't fit are refused) |
+| `PRIMA_BACKEND` | `llamacpp` | scoring backend |
+| `PRIMA_GGUF` | **required** | path to the local `.gguf` checkpoint |
+| `PRIMA_MMPROJ` | — | projector `.gguf` — enables vision in chat (base64 data URLs) |
+| `PRIMA_LLAMA_GPU_LAYERS` | `-1` | llama.cpp offload: `0` CPU, `-1` all layers, `N` first N |
+| `PRIMA_KV_TYPE_K` / `PRIMA_KV_TYPE_V` | `f16` | KV cache type — `q8_0` halves KV memory and enables flash attention |
+| `PRIMA_SWA_FULL` | `1` | `0` = window-sized SWA cache: sliding-window layers stop scaling with the context (needed for 100K+ on consumer GPUs) |
+| `PRIMA_PARALLEL` | `1` | chat/vision generation slots — like llama.cpp `--parallel`: N requests run concurrently, each getting total ÷ N context |
+| `PRIMA_CALIBRATED_TEMPERATURE` | `3.4` | built-in `:calibrated` scenario temperature (fitted across mixed workloads, validated held-out) |
+| `PRIMA_CHAT_TOKENS` | `180000` | TOTAL chat/vision context, split across the slots (`total ÷ PRIMA_PARALLEL` per slot, llama.cpp `-c` semantics); requests above the per-slot share are refused with 400 (0 = unlimited) |
+| `PRIMA_MODEL_NAME` | `prima-ratio-gemma4-12b` | model-id base for variants |
+| `PRIMA_MANIFEST` | `build/calibration-manifest.json` | calibration state file (mount it, back it up) |
+| `PRIMA_MAX_TOKENS` | `4096` | scoring context budget (no truncation — rows that don't fit are refused) |
 
 ---
 

@@ -1,8 +1,8 @@
-# Submission — semif-server + Gemma4-12B (generalist, zero-shot)
+# Submission — prima-ratio + Gemma4-12B (generalist, zero-shot)
 
 Suggested discussion title:
 
-> semif-server + Gemma4-12B (generalist, zero-shot): 0.702 acc / KL 4.93 raw — 0.089 ECE after one global temperature
+> prima-ratio + Gemma4-12B (generalist, zero-shot): 0.702 acc / KL 4.93 raw — 0.089 ECE after one global temperature
 
 ---
 
@@ -21,7 +21,7 @@ temperature preserves every argmax, which is why accuracy is identical.
 
 ## What this is
 
-[semif-server](https://github.com/andrea-tomassi/semif-server) — a single-model
+[prima-ratio](https://github.com/andrea-tomassi/prima-ratio) — a single-model
 System One endpoint (typed decisions + chat + vision) running a local
 Gemma4-12B-it `UD-Q6_K_XL` GGUF through llama.cpp on **one RTX 4060 Ti 16 GB**
 (150K scoring context, q8_0 KV + window-sized SWA). Rows replay through
@@ -47,4 +47,4 @@ definition Jev measures 0.031; on the soft-correctness variant closest to the
 published 0.144, this run measures 0.135).
 
 Harness and reproduction: `benchmarks/typed_decisions_bench.py` in the
-[semif-server repository](https://github.com/andrea-tomassi/semif-server).
+[prima-ratio repository](https://github.com/andrea-tomassi/prima-ratio).

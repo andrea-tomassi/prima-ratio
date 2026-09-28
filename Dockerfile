@@ -1,30 +1,67 @@
 # syntax=docker/dockerfile:1
 # ---------------------------------------------------------------------------
-# single-stage: the venv is the payload — no builder/runtime duplication
-# (keeps the build well under ~10 GB of transient disk on small hosts)
+# prima-ratio — one image: GGUF engine through llama.cpp, decisions + chat +
+# vision on a single GPU. Multi-stage: nvcc only in the builder; the runtime
+# carries the CUDA runtime libraries plus the finished venv. No model is baked
+# into the image — mount your .gguf (and optional vision projector).
+#
+#   docker run --gpus all -p 8000:8000 \
+#     -v $HOME/.cache/huggingface:/cache/huggingface \
+#     -v ./build:/app/build -v /path/to/models:/models:ro \
+#     -e PRIMA_GGUF=/models/model.gguf \
+#     ghcr.io/andrea-tomassi/prima-ratio:latest
 # ---------------------------------------------------------------------------
-FROM python:3.12-slim
+FROM nvidia/cuda:12.9.1-devel-ubuntu22.04 AS builder
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-RUN apt-get update && apt-get install -y --no-install-recommends git gcc libc6-dev libgomp1 ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3.10 python3.10-venv python3.10-dev build-essential ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
 ENV UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy \
+    UV_LINK_MODE=copy
+
+# CUDA arch must be pinned explicitly: the build container has no GPU, so the
+# "native" detection falls back to a 5.2 PTX target and every kernel is
+# JIT-compiled at runtime (~3x slower). Default list covers Turing -> Hopper
+# and Blackwell natively (RTX 20/30/40/50, A100, H100) plus a 120 PTX target
+# for forward compatibility. Narrow it for a faster build / smaller image.
+ARG CUDA_ARCHS="75;80;86;89;90;120;120-virtual"
+ENV CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS}"
+# nvcc is memory-hungry: cap parallel compile jobs on low-RAM builders
+ARG BUILD_PARALLEL=8
+ENV CMAKE_BUILD_PARALLEL_LEVEL=${BUILD_PARALLEL}
+
+RUN uv venv /opt/venv --python python3.10
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH"
+
+COPY pyproject.toml /build/pyproject.toml
+COPY LICENSE /build/LICENSE
+COPY README.md /build/README.md
+COPY prima_ratio /build/prima_ratio
+RUN uv pip install --no-cache /build \
+    && rm -rf /root/.cache/uv /root/.cache/pip /build
+
+# note: `import llama_cpp` is NOT run at build time — its libraries link against
+# libcuda.so.1, which only exists at runtime through the NVIDIA container toolkit.
+
+# ---------------------------------------------------------------------------
+FROM nvidia/cuda:12.9.1-runtime-ubuntu22.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3.10 libgomp1 ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/venv /opt/venv
+
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH" \
     HF_HOME=/cache/huggingface \
-    SEMIF_MANIFEST=/app/build/calibration-manifest.json
+    PRIMA_MANIFEST=/app/build/calibration-manifest.json \
+    PRIMA_LLAMA_GPU_LAYERS=-1
 
 WORKDIR /app
-
-# pin: bump deliberately (calibration fingerprints are bound to the served revision)
-ARG SEMIF_GIT_REV=23cf1f39fc9534fe81437200959b6dfc7106e45a
-RUN git clone https://github.com/TheoLeeCJ/SemIf-OpenJev.git /tmp/semif \
-    && git -C /tmp/semif checkout --quiet ${SEMIF_GIT_REV} \
-    && uv pip install --system "/tmp/semif" fastapi uvicorn flash-linear-attention \
-    && rm -rf /root/.cache/uv /root/.cache/pip /tmp/semif
-
-COPY api_server.py .
-COPY build/calibration-manifest.json ./build/calibration-manifest.json
-
 EXPOSE 8000
-CMD ["python", "api_server.py"]
+CMD ["python", "-m", "prima_ratio"]

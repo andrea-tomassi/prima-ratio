@@ -1,28 +1,27 @@
-"""System One-compatible HTTP wrapper around SemIf direct-logit scoring.
+"""prima-ratio — a local, single-model System One endpoint.
 
 Same request/response shape as Rizzo Flow / Kev / TypeSafe — 100% standard API:
 POST /v1/systemone  {state, model, questions{id:{type,instructions,criteria}}}
 Scenarios map to MODEL SUFFIXES (OpenRouter-style): the model field carries the variant.
 
-    semif-qwen3.5-4b                     raw logits (uncalibrated)
-    semif-qwen3.5-4b:vanilla             raw logits, explicit
-    semif-qwen3.5-4b:support-routing softmax(logits/T), T from the calibration manifest
+    prima-ratio-gemma4-12b                    raw logits (same as :uncalibrated)
+    prima-ratio-gemma4-12b:calibrated         built-in cross-workload temperature (recommended)
+    prima-ratio-gemma4-12b:uncalibrated       raw logits, explicit (not recommended)
+    prima-ratio-gemma4-12b:your-scenario      softmax(logits/T), T from the calibration manifest
 
-State is prefilled once and all questions are scored in parallel (SemIf shared mode,
-with per-row direct fallback when the tokenized state prefix is not stable).
+State is prefilled once and all questions are scored in parallel (shared-state
+prefix reuse, with per-row fallback when the tokenized prefix is not stable).
 `state` may also be a list of OpenAI-style content parts: images (base64 data
-URLs) join the decision context through the vision projector, and the option
-logits are read conditioned on the image (GGUF backend + SEMIF_MMPROJ only).
-Also: POST /v1/chat/completions — normal chat on the same in-memory model.
-Scenario temperatures live in build/calibration-manifest.json.
+URLs) join the decision context through the vision projector and the option
+logits are read conditioned on the image (PRIMA_MMPROJ).
+Also: POST /v1/chat/completions — chat on the same in-memory weights.
+Scenario temperatures live in build/calibration-manifest.json (PRIMA_MANIFEST).
 
-Backends (env-driven, see README):
-    SEMIF_BACKEND=torch      HF transformers bf16 checkpoint (default; Qwen3.5-4B)
-    SEMIF_BACKEND=llamacpp   local GGUF through llama.cpp (SEMIF_GGUF=path,
-                             SEMIF_LLAMA_GPU_LAYERS=-1 for full GPU offload;
-                             scoring and chat share the loaded weights)
-Environment: SEMIF_MODEL / SEMIF_REVISION / SEMIF_MODEL_NAME / SEMIF_MANIFEST /
-SEMIF_MAX_TOKENS also override their defaults.
+One backend: a local GGUF through llama.cpp (PRIMA_GGUF) — a single model in
+VRAM serving decisions, chat and vision. Environment: PRIMA_MODEL /
+PRIMA_REVISION / PRIMA_MODEL_NAME / PRIMA_MAX_TOKENS / PRIMA_MMPROJ /
+PRIMA_PARALLEL / PRIMA_CHAT_TOKENS / PRIMA_CALIBRATED_TEMPERATURE /
+PRIMA_HOST / PRIMA_PORT.
 """
 import contextlib
 import hashlib
@@ -39,48 +38,32 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from semif_phase1 import direct as direct_module
-from semif_phase1.core import LETTERS, load_causal_model, validate_row
-from semif_phase1.shared import score_shared
+from .engine import llamacpp as engine_backend
+from .engine.prompts import LETTERS, validate_row
 
-BACKEND = os.environ.get("SEMIF_BACKEND", "torch").strip().lower()
-if BACKEND not in {"torch", "llamacpp"}:
-    raise SystemExit(f"SEMIF_BACKEND must be 'torch' or 'llamacpp', got {BACKEND!r}")
-_DEFAULTS = {
-    "torch": ("Qwen/Qwen3.5-4B", "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a", "semif-qwen3.5-4b"),
-    "llamacpp": ("unsloth/gemma-4-12b-it", "55cdba0740a9765956f49501f689a66b098feda3", "semif-gemma4-12b"),
-}
-_DEFAULT_SOURCE, _DEFAULT_REVISION, _DEFAULT_NAME = _DEFAULTS[BACKEND]
-MODEL_SOURCE = os.environ.get("SEMIF_MODEL", _DEFAULT_SOURCE)
-REVISION = os.environ.get("SEMIF_REVISION", _DEFAULT_REVISION)
-MODEL_BASE = os.environ.get("SEMIF_MODEL_NAME", _DEFAULT_NAME)
-GGUF_PATH = os.environ.get("SEMIF_GGUF")
-MMPROJ_PATH = os.environ.get("SEMIF_MMPROJ")
-MAX_TOKENS = int(os.environ.get("SEMIF_MAX_TOKENS", "4096"))
-CHAT_MODEL = os.environ.get("SEMIF_CHAT_NAME", MODEL_BASE.removeprefix("semif-") + "-chat")
+MODEL_SOURCE = os.environ.get("PRIMA_MODEL", "unsloth/gemma-4-12b-it")
+REVISION = os.environ.get("PRIMA_REVISION", "55cdba0740a9765956f49501f689a66b098feda3")
+MODEL_BASE = os.environ.get("PRIMA_MODEL_NAME", "prima-ratio-gemma4-12b")
+GGUF_PATH = os.environ.get("PRIMA_GGUF")
+MMPROJ_PATH = os.environ.get("PRIMA_MMPROJ")
+MAX_TOKENS = int(os.environ.get("PRIMA_MAX_TOKENS", "4096"))
+CHAT_MODEL = os.environ.get("PRIMA_CHAT_NAME", MODEL_BASE.removeprefix("prima-ratio-") + "-chat")
 DEFAULT_TRUE = "Yes. The evidence supports an affirmative answer to the question."
 DEFAULT_FALSE = "No. The evidence supports a negative answer to the question."
-MANIFEST_PATH = os.environ.get("SEMIF_MANIFEST", "build/calibration-manifest.json")
+MANIFEST_PATH = os.environ.get("PRIMA_MANIFEST", "build/calibration-manifest.json")
 CALIB_FOLDS = 5
 CALIB_SEED = 217
 CALIB_MIN_ROWS_PER_TYPE = 10
 SCENARIO_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*$")
 
-if BACKEND == "llamacpp":
-    if not GGUF_PATH or not os.path.isfile(GGUF_PATH):
-        raise SystemExit("SEMIF_BACKEND=llamacpp requires SEMIF_GGUF pointing at a local .gguf file")
-    from pathlib import Path
+if not GGUF_PATH or not os.path.isfile(GGUF_PATH):
+    raise SystemExit("PRIMA_GGUF must point at a local .gguf file")
+from pathlib import Path
 
-    from semif_phase1 import llamacpp_backend
-
-    model, tokenizer, metadata = llamacpp_backend.load_model(
-        MODEL_SOURCE, REVISION, Path(GGUF_PATH), context_tokens=MAX_TOKENS)
-    _score_direct = llamacpp_backend.score
-    _score_shared = llamacpp_backend.score_shared
-else:
-    model, tokenizer, metadata = load_causal_model(MODEL_SOURCE, REVISION, "auto", "bfloat16")
-    _score_direct = direct_module.score
-    _score_shared = score_shared
+model, tokenizer, metadata = engine_backend.load_model(
+    MODEL_SOURCE, REVISION, Path(GGUF_PATH), context_tokens=MAX_TOKENS)
+_score_direct = engine_backend.score
+_score_shared = engine_backend.score_shared
 
 
 def _softmax(vals, T=1.0):
@@ -99,24 +82,29 @@ def _load_manifest():
 
 
 MANIFEST = _load_manifest()
-GENERIC_TEMPERATURE = float(os.environ.get("SEMIF_GENERIC_TEMPERATURE", "3.4"))
+CALIBRATED_TEMPERATURE = float(os.environ.get("PRIMA_CALIBRATED_TEMPERATURE", "3.4"))
 BUILTIN_SCENARIOS = {
-    "vanilla": {
+    "uncalibrated": {
         "temperature": 1.0, "built_in": True,
-        "description": "raw option logits, no temperature scaling",
+        "description": ("raw option logits, no temperature scaling — not calibrated: "
+                        "systematically overconfident, not recommended for decisions; "
+                        "use ':calibrated' or fit your own workload"),
     },
-    "generic": {
-        "temperature": GENERIC_TEMPERATURE, "built_in": True,
-        "description": ("generic temperature fitted across mixed workloads and validated "
-                        "held-out (improves every tested workload vs raw, none worsens); "
-                        "per-workload calibration with your own labels refines it"),
+    "calibrated": {
+        "temperature": CALIBRATED_TEMPERATURE, "built_in": True,
+        "description": ("one temperature fitted across mixed workloads and validated "
+                        "held-out (improves every tested workload vs uncalibrated, none "
+                        "worsens); per-workload calibration with your own labels refines it"),
     },
 }
+# legacy built-in names from older releases: ignored when reading manifests and
+# reserved against re-creation — NOT accepted as request aliases (use the current names)
+LEGACY_BUILTIN_NAMES = {"vanilla", "generic"}
 
 SCENARIOS = {name: entry for name, entry in MANIFEST.get("scenarios", {}).items()
-             if name not in BUILTIN_SCENARIOS}
+             if name not in BUILTIN_SCENARIOS and name not in LEGACY_BUILTIN_NAMES}
 
-app = FastAPI(title="semif-systemone")
+app = FastAPI(title="prima-ratio")
 
 # the one loaded model serves both scoring and chat: serialize all forwards
 _GEN_LOCK = threading.Lock()
@@ -213,13 +201,13 @@ def models():
     (suffix after ':'); fit metadata rides in the optional 'meta' field."""
     now = int(time.time())
     data = [{"id": MODEL_BASE, "object": "model", "created": now,
-             "owned_by": "semif-server", "meta": {"variant": "raw logits (uncalibrated default)"}}]
+             "owned_by": "prima-ratio", "meta": {"variant": "raw logits (uncalibrated default)"}}]
     for name, e in sorted(BUILTIN_SCENARIOS.items()):
         data.append({
             "id": f"{MODEL_BASE}:{name}",
             "object": "model",
             "created": now,
-            "owned_by": "semif-server",
+            "owned_by": "prima-ratio",
             "meta": {"temperature": e.get("temperature"), "built_in": True,
                      "description": e.get("description")},
         })
@@ -228,11 +216,11 @@ def models():
             "id": f"{MODEL_BASE}:{name}",
             "object": "model",
             "created": now,
-            "owned_by": "semif-server",
+            "owned_by": "prima-ratio",
             "meta": {k: e.get(k) for k in ("temperature", "n_fit", "ece_raw", "ece_out_of_fold", "fitted_at", "description") if e.get(k) is not None},
         })
     data.append({"id": CHAT_MODEL, "object": "model", "created": now,
-                 "owned_by": "semif-server", "meta": {"variant": "normal chat completions (POST /v1/chat/completions)",
+                 "owned_by": "prima-ratio", "meta": {"variant": "normal chat completions (POST /v1/chat/completions)",
                                                          "vision": bool(MMPROJ_PATH),
                                                          "parallel": CHAT_PARALLEL,
                                                          "slot_tokens": CHAT_SLOT_TOKENS or None}})
@@ -293,7 +281,8 @@ def systemone(req: Req):
                 "requires held-out validation on your own labels"
             )
     else:
-        status = "conditional option score; uncalibrated as decision confidence (use a model suffix — see GET /v1/models)"
+        status = ("conditional option score; uncalibrated as decision confidence — use \":calibrated\" "
+                  "or fit your own workload with POST /v1/calibrate (see GET /v1/models)")
 
     answers = {}
     input_tokens = 0
@@ -329,7 +318,7 @@ def systemone(req: Req):
         "answers": answers,
         "usage": {"input_tokens": input_tokens, "output_tokens": 0},
         "latency_ms": latency_ms,
-        "x_semif": {
+        "x_prima": {
             "timing": timing,
             "score_mode": score_mode,
             "scenario": scenario_used,
@@ -349,8 +338,8 @@ class ChatReq(BaseModel):
 
 
 # --- GGUF chat: a pool of generation contexts (model weights shared) ---
-CHAT_PARALLEL = max(1, int(os.environ.get("SEMIF_PARALLEL", "1")))
-CHAT_TOKENS = int(os.environ.get("SEMIF_CHAT_TOKENS", "180000"))  # total across slots; 0 = unlimited
+CHAT_PARALLEL = max(1, int(os.environ.get("PRIMA_PARALLEL", "1")))
+CHAT_TOKENS = int(os.environ.get("PRIMA_CHAT_TOKENS", "180000"))  # total across slots; 0 = unlimited
 CHAT_SLOT_TOKENS = CHAT_TOKENS // CHAT_PARALLEL if CHAT_TOKENS else 0
 _VISION_LOCK = threading.Lock()
 _CHAT_SLOTS: list[dict] = []
@@ -387,7 +376,7 @@ def _chat_context_lease(lib, native_model, need_tokens: int):
             params.n_seq_max = 1
             params.n_outputs_max = 1
             try:  # vendored llama.cpp patch: KV type / SWA window knobs
-                from semif_phase1.llamacpp_backend import _apply_context_env
+                from .engine.llamacpp import _apply_context_env
             except ImportError:
                 pass
             else:
@@ -475,7 +464,7 @@ def _gguf_vision_context():
     if not MMPROJ_PATH or not os.path.isfile(MMPROJ_PATH):
         raise HTTPException(
             status_code=400,
-            detail="vision is not enabled on this server (set SEMIF_MMPROJ to a projector .gguf)",
+            detail="vision is not enabled on this server (set PRIMA_MMPROJ to a projector .gguf)",
         )
     import llama_cpp.mtmd_cpp as mtmd
 
@@ -576,10 +565,10 @@ def _gguf_vision_release(chunks, bitmaps) -> None:
 
 
 def _check_chat_budget(prompt_tokens: int, max_tokens: int) -> int:
-    """Refuse requests above the per-slot share of SEMIF_CHAT_TOKENS (no truncation).
+    """Refuse requests above the per-slot share of PRIMA_CHAT_TOKENS (no truncation).
 
-    llama.cpp semantics: SEMIF_CHAT_TOKENS is the TOTAL context and each of the
-    SEMIF_PARALLEL slots gets total / parallel (e.g. 180000 with parallel=2 ->
+    llama.cpp semantics: PRIMA_CHAT_TOKENS is the TOTAL context and each of the
+    PRIMA_PARALLEL slots gets total / parallel (e.g. 180000 with parallel=2 ->
     90000 per slot).
     """
     need_tokens = prompt_tokens + max_tokens + 8
@@ -590,14 +579,14 @@ def _check_chat_budget(prompt_tokens: int, max_tokens: int) -> int:
             "slot_tokens": CHAT_SLOT_TOKENS,
             "total_tokens": CHAT_TOKENS,
             "parallel": CHAT_PARALLEL,
-            "hint": "lower max_tokens / shorten the prompt, raise SEMIF_CHAT_TOKENS, or lower SEMIF_PARALLEL",
+            "hint": "lower max_tokens / shorten the prompt, raise PRIMA_CHAT_TOKENS, or lower PRIMA_PARALLEL",
         })
     return need_tokens
 
 
 def _gguf_generate(lib, vocab, context, logits, position: int, req: ChatReq, eos_ids, rng):
     """Autoregressive generation on a leased context; returns (pieces, generated)."""
-    from semif_phase1.llamacpp_backend import _gguf_piece
+    from .engine.llamacpp import _gguf_piece
 
     pieces = bytearray()
     generated = 0
@@ -680,9 +669,6 @@ def _gguf_vision_score_rows(rows: list[dict], max_tokens: int):
     token logits are read at the last position: the same quantity as the text
     path (full-vocabulary logits restricted to the declared options).
     """
-    if BACKEND != "llamacpp":
-        raise HTTPException(status_code=400,
-                            detail="vision decisions require the GGUF backend (SEMIF_BACKEND=llamacpp)")
     import ctypes
 
     import llama_cpp.mtmd_cpp as mtmd
@@ -744,7 +730,7 @@ def _score_row(row: dict, metadata: dict):
 
 
 def _gguf_chat_completions(req: ChatReq):
-    from semif_phase1.llamacpp_backend import _gguf_tokenize
+    from .engine.llamacpp import _gguf_tokenize
 
     lib = model.engine.lib
     vocab = model.vocab
@@ -839,61 +825,8 @@ def _gguf_chat_completions(req: ChatReq):
 
 @app.post("/v1/chat/completions")
 def chat_completions(req: ChatReq):
-    """OpenAI-compatible chat on the same in-memory model."""
-    if BACKEND == "llamacpp":
-        return _gguf_chat_completions(req)
-    import torch
-
-    try:
-        prompt = tokenizer.apply_chat_template(
-            req.messages, tokenize=False, add_generation_prompt=True,
-            enable_thinking=req.thinking)
-    except TypeError:
-        prompt = tokenizer.apply_chat_template(
-            req.messages, tokenize=False, add_generation_prompt=True)
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-    n_prompt = inputs["input_ids"].shape[1]
-
-    t0 = time.perf_counter()
-    with _GEN_LOCK, torch.inference_mode():
-        out = model.generate(
-            **inputs,
-            max_new_tokens=req.max_tokens,
-            do_sample=req.temperature > 0,
-            temperature=req.temperature if req.temperature > 0 else None,
-            top_p=req.top_p,
-            pad_token_id=tokenizer.eos_token_id,
-        )
-    dt = time.perf_counter() - t0
-    gen_ids = out[0][n_prompt:]
-    text = tokenizer.decode(gen_ids, skip_special_tokens=True)
-
-    reasoning = None
-    if "</think>" in text:
-        think, _, content = text.partition("</think>")
-        reasoning = think.replace("<think>", "").strip()
-        content = content.strip()
-    else:
-        content = text.strip()
-
-    message = {"role": "assistant", "content": content}
-    if reasoning:
-        message["reasoning_content"] = reasoning
-    return {
-        "id": f"chatcmpl-{CHAT_MODEL}",
-        "object": "chat.completion",
-        "model": req.model,
-        "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
-        "usage": {
-            "prompt_tokens": n_prompt,
-            "completion_tokens": int(gen_ids.shape[0]),
-            "total_tokens": n_prompt + int(gen_ids.shape[0]),
-        },
-        "timings": {
-            "generation_seconds": round(dt, 2),
-            "tokens_per_second": round(gen_ids.shape[0] / dt, 1) if dt > 0 else None,
-        },
-    }
+    """OpenAI-compatible chat on the same in-memory weights."""
+    return _gguf_chat_completions(req)
 
 
 class CalibrateReq(BaseModel):
@@ -966,7 +899,7 @@ def calibrate(req: CalibrateReq):
     validate out-of-fold, publish into the manifest and hot-reload. No restart."""
     if not SCENARIO_RE.fullmatch(req.scenario):
         raise HTTPException(status_code=400, detail="scenario name must match [a-z0-9]+(-[a-z0-9]+)*")
-    if req.scenario in BUILTIN_SCENARIOS:
+    if req.scenario in BUILTIN_SCENARIOS or req.scenario in LEGACY_BUILTIN_NAMES:
         raise HTTPException(status_code=400,
                             detail=f"'{req.scenario}' is reserved (built-in scenario: {BUILTIN_SCENARIOS[req.scenario]['description']})")
     if req.scenario in SCENARIOS and not req.overwrite:
@@ -1045,7 +978,7 @@ def calibrate(req: CalibrateReq):
     ece_ood = _ece(ood)
     accuracy = round(sum(ok for _, ok in conf_items) / len(conf_items), 4)
 
-    fingerprint = {"model": MODEL_SOURCE, "revision": REVISION, "backend": BACKEND}
+    fingerprint = {"model": MODEL_SOURCE, "revision": REVISION, "backend": "llamacpp"}
     entry = {
         "temperature": temperature,
         "n_fit": len(pairs),
@@ -1096,7 +1029,7 @@ def calibrate(req: CalibrateReq):
 
 
 def _do_delete_scenario(scenario: str):
-    if scenario in BUILTIN_SCENARIOS:
+    if scenario in BUILTIN_SCENARIOS or scenario in LEGACY_BUILTIN_NAMES:
         raise HTTPException(status_code=400,
                             detail=f"'{scenario}' is built-in and cannot be deleted")
     if scenario not in SCENARIOS:

@@ -1,7 +1,7 @@
 # 📊 Benchmarks
 
 Independent, reproducible comparisons of the GGUF deployment
-(`ghcr.io/andrea-tomassi/semif-server:gguf`) against the published
+(`ghcr.io/andrea-tomassi/prima-ratio:latest`) against the published
 [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) baselines — including the one
 public comparison point against **Jev**.
 
@@ -9,8 +9,8 @@ Unless noted otherwise, this deployment's numbers were measured on the **same
 box and config**:
 
 > RTX 4060 Ti 16 GB · Gemma4-12B-it `UD-Q6_K_XL` · llama.cpp backend ·
-> `q8_0` KV cache + window-sized SWA (`SEMIF_SWA_FULL=0`) ·
-> `SEMIF_MAX_TOKENS=150000` · decisions are **last-position option logits**, no
+> `q8_0` KV cache + window-sized SWA (`PRIMA_SWA_FULL=0`) ·
+> `PRIMA_MAX_TOKENS=150000` · decisions are **last-position option logits**, no
 > generation.
 
 ---
@@ -43,7 +43,7 @@ balanced accuracies), the same protocol the SemIf reference uses.
 |---|---|---|---|---|
 | SemIf (pinned reference) | Qwen3.5-4B, bf16 | 0.813 | 0.806 | SemIf `results/phase1-summary.json` |
 | SemIf exl3 bridge | Qwen3.8-27B, exl3 5.0bpw | **0.9579** | 0.9583 | SemIf `exl3-bridge/` |
-| **semif-server** ⋯ *this repo* | **Gemma4-12B, Q6_K_XL** | **0.9378** | **0.9444** | measured — `benchmarks/authored144_api.py` |
+| **prima-ratio** ⋯ *this repo* | **Gemma4-12B, Q6_K_XL** | **0.9378** | **0.9444** | measured — `benchmarks/authored144_api.py` |
 | Jev (`typesafe/jev-1.13`, live) | closed service | **0.9630** | 0.9722 | measured — `benchmarks/jev_bench.py` |
 
 Per-family balanced accuracy (this repo): `candidate_selection` 0.944 ·
@@ -64,7 +64,7 @@ pinned-4B majority** over its three runs, not accuracy.
 |---|---|---|---|
 | SemIf pinned 4B *(self-consistency across its runs)* | Qwen3.5-4B, bf16 | 0.9910 | 7/777 unstable rows |
 | SemIf exl3 bridge | Qwen3.8-27B, exl3 5.0bpw | 0.8443 | 121 |
-| **semif-server** ⋯ *this repo* | **Gemma4-12B, Q6_K_XL** | **0.8391** | **125** |
+| **prima-ratio** ⋯ *this repo* | **Gemma4-12B, Q6_K_XL** | **0.8391** | **125** |
 | SemIf control | Qwen3-Reranker-4B | 0.4157 | 362 |
 | Jev (`typesafe/jev-1.13`, live) | closed service | 0.8095 | 148 |
 
@@ -87,7 +87,7 @@ selection manifest, then scores every row and recomputes the published metrics
 |---|---|---|
 | published: `opus` | 0.9123 | 0.1013 |
 | published: `sol` | 0.9065 | 0.1030 |
-| **semif-server + Gemma4-12B** *(this repo)* | **0.8978** | **0.1400** |
+| **prima-ratio + Gemma4-12B** *(this repo)* | **0.8978** | **0.1400** |
 | published Jev (`typesafe`) | 0.8831 | 0.1268 |
 | SemIf 4B (committed) | 0.8453 | 0.1770 |
 | Jev re-run live *(check)* | 0.8831 | 0.1245 |
@@ -114,9 +114,9 @@ workflows or question schemas).
 | System | Mode | Acc | Soft | F1 | KL | TV | Brier | ECE | ScoreMAE | Within-1 | ms/case |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | Prior (ignores input) | reference | 0.470 | 0.430 | 0.207 | 0.347 | 0.317 | 0.189 | **0.088** | – | – | 0 |
-| **semif-server + Gemma4-12B (raw)** | **generalist, zero-shot** | **0.702** | 0.568 | 0.520 | 4.927 | 0.414 | 0.389 | 0.276 | 0.513 | 0.889 | **691** |
-| semif-server + Gemma4-12B (+ global T on own data) | generalist + calibration | 0.702 | 0.568 | 0.520 | 3.660 | 0.351 | 0.288 | 0.199 | 0.418 | 0.935 | 691 |
-| semif-server + Gemma4-12B (+ global T on the train split) | generalist + calibration | 0.702 | 0.568 | 0.520 | 3.351 | **0.278** | **0.162** | **0.089** | 0.418 | 0.935 | 691 |
+| **prima-ratio + Gemma4-12B (raw)** | **generalist, zero-shot** | **0.702** | 0.568 | 0.520 | 4.927 | 0.414 | 0.389 | 0.276 | 0.513 | 0.889 | **691** |
+| prima-ratio + Gemma4-12B (+ global T on own data) | generalist + calibration | 0.702 | 0.568 | 0.520 | 3.660 | 0.351 | 0.288 | 0.199 | 0.418 | 0.935 | 691 |
+| prima-ratio + Gemma4-12B (+ global T on the train split) | generalist + calibration | 0.702 | 0.568 | 0.520 | 3.351 | **0.278** | **0.162** | **0.089** | 0.418 | 0.935 | 691 |
 | TypeSafe Jev 1.13.0 | generalist, zero-shot | 0.727 | 0.580 | 0.613 | 1.442 | 0.251 | 0.148 | 0.144 | 0.391 | 0.952 | 710 |
 | meraGPT Decider 1 | generalist, zero-shot | **0.768** | **0.608** | **0.641** | **0.096** | **0.149** | **0.052** | 0.180 | **0.219** | **0.984** | 526 |
 
@@ -148,7 +148,7 @@ against any System One endpoint, captures per-case latency).
 
 ## 5. Generic temperature — cross-workload validation
 
-The claim for the built-in `:generic` variant: a **single temperature fitted on
+The claim for the built-in `:calibrated` variant: a **single temperature fitted on
 some workloads, applied to a different one, never gets worse than raw**. Setup:
 NLL/ECE computed on four workloads (decisions only; temperature preserves every
 argmax); fit on one, evaluate on the rest.
@@ -162,11 +162,11 @@ argmax); fit on one, evaluate on the rest.
 
 Every held-out cell improves **both** NLL and ECE — even fitting on a
 completely different domain (`typed-decisions` → `mermaid` −39 %). That is why
-`:generic` can ship as a default: it is not optimal per workload (per-workload
+`:calibrated` can ship as the default: it is not optimal per workload (per-workload
 calibration still wins by up to ~20 % NLL), but it is **never worse than
 uncalibrated**.
 
-Shipped value: **T = 3.4** (`SEMIF_GENERIC_TEMPERATURE`), fitted on the
+Shipped value: **T = 3.4** (`PRIMA_CALIBRATED_TEMPERATURE` / `:calibrated`), fitted on the
 mixed-workload fit set and validated on the held-out workloads above.
 
 ---
@@ -176,7 +176,7 @@ mixed-workload fit set and validated on the held-out workloads above.
 - decision latency: **127–144 ms** per decision locally · Jev via the public
   endpoint: p50 **358–380 ms** per call (network included), ~$0.00002–0.00017/call
   (all Jev rows in this document cost ~$0.085 in total)
-- chat slots: llama.cpp semantics — `SEMIF_CHAT_TOKENS` total ÷ `SEMIF_PARALLEL`
+- chat slots: llama.cpp semantics — `PRIMA_CHAT_TOKENS` total ÷ `PRIMA_PARALLEL`
   slots (1×200K or 2×100K both verified on the 16 GB card)
 - vision: the same weights serve image-conditioned decisions **and** image chat
 - VRAM peak: **15.3 GB** (150K scoring + 199K chat slot + vision loaded)
@@ -213,15 +213,15 @@ mixed-workload fit set and validated on the held-out workloads above.
 # server (this repo)
 docker run --gpus all -p 8000:8000 \
   -v ~/.cache/huggingface:/cache/huggingface -v /path/to/models:/models:ro \
-  -e SEMIF_GGUF=/models/gemma-4-12b-it-UD-Q6_K_XL.gguf \
-  -e SEMIF_MMPROJ=/models/mmproj-F16.gguf \
-  -e SEMIF_MAX_TOKENS=150000 \
-  -e SEMIF_KV_TYPE_K=q8_0 -e SEMIF_KV_TYPE_V=q8_0 -e SEMIF_SWA_FULL=0 \
-  ghcr.io/andrea-tomassi/semif-server:gguf
+  -e PRIMA_GGUF=/models/gemma-4-12b-it-UD-Q6_K_XL.gguf \
+  -e PRIMA_MMPROJ=/models/mmproj-F16.gguf \
+  -e PRIMA_MAX_TOKENS=150000 \
+  -e PRIMA_KV_TYPE_K=q8_0 -e PRIMA_KV_TYPE_V=q8_0 -e PRIMA_SWA_FULL=0 \
+  ghcr.io/andrea-tomassi/prima-ratio:latest
 
 # harnesses (fixtures come from the SemIf repository)
-python benchmarks/authored144_api.py  http://localhost:8000 semif-gemma4-12b
-python benchmarks/shape777_grouped.py http://localhost:8000 semif-gemma4-12b
+python benchmarks/authored144_api.py  http://localhost:8000 prima-ratio-gemma4-12b
+python benchmarks/shape777_grouped.py http://localhost:8000 prima-ratio-gemma4-12b
 python benchmarks/probe_ctx_max.py 90000     # context/VRAM headroom probe
 
 # Jev comparison: rebuild the frozen fixture from the public viewer snapshots
@@ -229,5 +229,5 @@ python benchmarks/probe_ctx_max.py 90000     # context/VRAM headroom probe
 # selection manifest), then score it:
 python build_typesafe.py --source-dir "$SRC" \
   --selection .../source-selection.jsonl --output /tmp/typesafe102.jsonl
-python benchmarks/run_typesafe102.py http://localhost:8000 semif-gemma4-12b
+python benchmarks/run_typesafe102.py http://localhost:8000 prima-ratio-gemma4-12b
 ```

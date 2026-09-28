@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Typed Decisions (LocalLLaMA/typed-decisions) harness: replay the 400-case test
-split against any System One endpoint (semif-server or Jev) and compute the
+split against any System One endpoint (prima-ratio or Jev) and compute the
 leaderboard metrics: Acc, Soft acc, KL, TV, Brier, ECE, Score MAE, Within-1, ms/case.
 
 Usage:

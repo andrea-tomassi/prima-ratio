@@ -1,29 +1,27 @@
 services:
-  semif-server:
-    # the distribution: llama.cpp + a local .gguf file (see README)
-    image: ${SEMIF_IMAGE:-ghcr.io/andrea-tomassi/semif-server:gguf}
-    container_name: semif-server
+  prima-ratio:
+    image: ${PRIMA_IMAGE:-ghcr.io/andrea-tomassi/prima-ratio:latest}
+    container_name: prima-ratio
     ports:
       - "8000:8000"
       - "10000:8000"          # second port kept for the reverse-proxy route
     environment:
+      - PRIMA_GGUF=/models/gemma-4-12b-it-UD-Q6_K_XL.gguf
+      - PRIMA_MMPROJ=/models/mmproj-F16.gguf        # optional: enables vision
+      - PRIMA_LLAMA_GPU_LAYERS=-1
+      - PRIMA_MAX_TOKENS=150000                     # scoring context budget
+      - PRIMA_KV_TYPE_K=q8_0
+      - PRIMA_KV_TYPE_V=q8_0
+      - PRIMA_SWA_FULL=0                            # window-sized SWA: 100K+ contexts fit
+      - PRIMA_PARALLEL=1
+      - PRIMA_CHAT_TOKENS=200000                    # total chat context, split by PRIMA_PARALLEL
+      - PRIMA_MODEL_NAME=prima-ratio-gemma4-12b
       - HF_HOME=/cache/huggingface
-      - SEMIF_MANIFEST=/app/build/calibration-manifest.json
-      # GGUF variant only (image tag :gguf, defaults already baked: backend
-      # llamacpp + full GPU offload) — point it at the mounted model:
-      # - SEMIF_GGUF=/models/gemma-4-12b-it-UD-Q6_K_XL.gguf
-      # - SEMIF_LLAMA_GPU_LAYERS=-1
-      # - SEMIF_MODEL_NAME=semif-gemma4-12b
-      # - SEMIF_MMPROJ=/models/mmproj-F16.gguf   # vision (chat + decisions)
-      # - SEMIF_MAX_TOKENS=150000                # long context
-      # - SEMIF_KV_TYPE_K=q8_0
-      # - SEMIF_KV_TYPE_V=q8_0                   # q8 KV: half memory + flash attention
-      # - SEMIF_SWA_FULL=0                       # window-sized SWA cache (100K+ on 16 GB)
-      # - SEMIF_PARALLEL=2                       # concurrent generation slots (chat/vision)
+      - PRIMA_MANIFEST=/app/build/calibration-manifest.json
     volumes:
       - ${HF_CACHE_DIR:-${HOME}/.cache/huggingface}:/cache/huggingface
       - ./build:/app/build                       # calibration manifest lives here
-      - ${GGUF_DIR:-./models}:/models:ro         # GGUF variant: model directory
+      - ${GGUF_DIR:-./models}:/models:ro         # your .gguf + projector
     deploy:
       resources:
         reservations:

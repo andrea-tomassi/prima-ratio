@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Score the frozen typesafe_public_102 fixture on a semif-server instance and
+"""Score the frozen typesafe_public_102 fixture on a prima-ratio instance and
 recompute the published metrics (equal_case_modal_agreement / total_variation)
 with the exact protocol of SemIf's benchmarks/evaluate_external.py."""
 import json, statistics, sys, time, urllib.request
