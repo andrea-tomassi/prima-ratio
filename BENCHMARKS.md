@@ -175,6 +175,48 @@ mixed-workload fit set and validated on the held-out workloads above.
 
 ---
 
+## 6. Bespoke-Nimble public suite — cross-domain, human labels
+
+[Bespoke-Nimble `PUBLIC_BENCHMARKS.md`](https://github.com/bespokelabsai/nimble/blob/main/docs/PUBLIC_BENCHMARKS.md)
+— 13 datasets converted to this API's exact record shape (`state` + `questions`, one
+Noul/Choice/Score per record), 3,880 records with labels produced by people, and the
+authors' own runner, validator and scorer. Their published run: Bespoke-Nimble-9B
+**74.8% macro / 75.9% micro**, Jev 1.13.0 **76.0% / 77.3%**.
+
+Our run (repo commit `62076b4`): all subsets rebuilt with their converters and verified
+**byte-identical** to the committed manifests (`dataset_sha256` + id lists), then scored
+through the production endpoint with `:calibrated`. 3,880/3,880 valid answers, zero errors.
+
+| Group | Subsets | prima-ratio macro | Nimble-9B | Jev 1.13.0 | prima-ratio micro | Nimble-9B | Jev 1.13.0 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **all** | 13 | **77.1%** | 74.8% | 76.0% | **77.7%** | 75.9% | 77.3% |
+| choice | 5 | 81.0% | 81.6% | 82.9% | 80.6% | 81.1% | 82.8% |
+| noul | 5 | 84.1% | 80.2% | 84.6% | 84.3% | 80.1% | 84.6% |
+| score | 3 | **58.8%** | 54.6% | 50.1% | **54.3%** | 51.2% | 45.2% |
+
+Highlights: moderation (Civil Comments 85.7% vs 81.0 / 70.3), answerability
+(SQuAD 2 86.3% vs 82.9 / 80.6), summary consistency (86.8% vs 81.2 / 75.7),
+rubric MAE (HelpSteer2 0.881 vs 0.967 / 0.962), MASSIVE de-DE 86.6% with an
+English↔German gap of **0.3 points** (Nimble-9B: 3.5).
+
+Calibration, same run (raw recovered exactly as `p_raw ∝ p_cal^T`; accuracy is
+temperature-invariant): mean ECE **0.114 calibrated vs 0.207 raw**, Brier improves
+on 13/13 subsets, and ECE beats both published models on MASSIVE (0.021/0.052),
+BoolQ (0.057) and SQuAD 2 (0.058).
+
+- 3,880 decisions in **23.7 min** client-side, median **0.29 s/record** on the 16 GB
+  card (Jev's median: 0.66 s/request hosted).
+- Same records, same instructions and criteria, same scorer as the published run; the
+  comparison is aggregate against their published numbers (no paired McNemar), Jev ran
+  "as shipped" and Nimble at T=1.0 in their tables.
+- Adapter notes: probabilities arrive rounded to 4 decimals and are renormalized exactly
+  as their own `api_probabilities` does; score answers carry `confidence` (product-side
+  since this run).
+- Two product gaps surfaced and acted on: the 2–16 choice-option cap rejected MASSIVE's
+  18 classes (now 2–26, letters A–Z) and score answers lacked `confidence`.
+
+---
+
 ## Operations (same deployment)
 
 - decision latency: **127–144 ms** per decision locally · Jev via the public

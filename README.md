@@ -234,6 +234,29 @@ benchmark (400 cases / 2,000 decisions), against everyone who publishes on it:
 \* The default calibration was fitted on several real workloads we use
 ourselves — the benchmark's test dataset was never used for calibration.
 
+### Also on the [Bespoke-Nimble public suite](https://github.com/bespokelabsai/nimble/blob/main/docs/PUBLIC_BENCHMARKS.md)
+
+13 human-labeled datasets (3,880 records), identical prompts and the authors'
+own scorer for every model — our run reproduces their data byte-for-byte and is
+scored by their code:
+
+| | prima-ratio | Jev 1.13.0 | Bespoke-Nimble-9B |
+|---|---:|---:|---:|
+| macro average (13 subsets) | **77.1%** | 76.0% | 74.8% |
+| micro average | **77.7%** | 77.3% | 75.9% |
+| noul / choice / rubric score (macro) | 84.1 / 81.0 / **58.8%** | 84.6 / 82.9 / 50.1% | 80.2 / 81.6 / 54.6% |
+
+- **Best of the three on both averages** — one 12B GGUF on a 16 GB card,
+  median **0.29 s per decision**, zero per-call cost.
+- Strongest on rubric **score** tasks (HelpSteer2 MAE **0.881** vs 0.962 / 0.967),
+  moderation (Civil Comments **85.7%** vs 81.0 / 70.3) and answerability
+  (SQuAD 2 **86.3%** vs 82.9 / 80.6).
+- **Calibration on real human labels**: `:calibrated` halves ECE (0.114 vs 0.207
+  raw) and improves Brier on **13/13** subsets; English↔German gap on MASSIVE:
+  **0.3 points** (Nimble-9B: 3.5).
+- Comparison is against the authors' published numbers (Jev as shipped, Nimble at
+  T=1); full protocol and caveats: **[BENCHMARKS.md](BENCHMARKS.md)**.
+
 ---
 
 ## 📦 Releases & Docker image
