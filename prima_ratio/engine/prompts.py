@@ -10,7 +10,7 @@ import hashlib
 import json
 import math
 
-LETTERS = "ABCDEFGHIJKLMNOP"
+LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 DIRECT_SYSTEM = (
     "Apply the supplied criterion to the supplied evidence. Choose exactly one listed option. "
     "Respond with only its uppercase letter, with no explanation or reasoning."
@@ -32,7 +32,7 @@ def validate_row(row: dict) -> None:
         raise ValueError("state must be finite JSON-compatible data") from error
     options = row["options"]
     if not isinstance(options, list) or not 2 <= len(options) <= len(LETTERS):
-        raise ValueError("options must contain 2-16 entries")
+        raise ValueError("options must contain 2-26 entries")
     ids = []
     for option in options:
         if not isinstance(option, dict) or not isinstance(option.get("id"), str) or not isinstance(option.get("description"), str):
