@@ -1,0 +1,327 @@
+{
+  "endpoint": "production (:calibrated)",
+  "model": "prima-ratio-gemma4-12b:calibrated",
+  "nimble_repo_commit": "62076b4f2d365b5879dafcf7f6dd072a1fe76df7",
+  "records": 3880,
+  "valid": 3880,
+  "errors": 0,
+  "subsets": {
+    "vitaminc-dev": {
+      "type": "choice",
+      "n": 599,
+      "accuracy": 0.7563,
+      "ece": 0.1688,
+      "multiclass_brier": 0.4089
+    },
+    "massive-en-US": {
+      "type": "choice",
+      "n": 350,
+      "accuracy": 0.8629,
+      "ece": 0.052,
+      "multiclass_brier": 0.2142
+    },
+    "massive-de-DE": {
+      "type": "choice",
+      "n": 350,
+      "accuracy": 0.8657,
+      "ece": 0.0207,
+      "multiclass_brier": 0.2132
+    },
+    "boolq": {
+      "type": "noul",
+      "n": 300,
+      "accuracy": 0.8633,
+      "ece": 0.0569,
+      "multiclass_brier": 0.2018
+    },
+    "squad2": {
+      "type": "noul",
+      "n": 299,
+      "accuracy": 0.8629,
+      "ece": 0.0576,
+      "multiclass_brier": 0.2133
+    },
+    "paws": {
+      "type": "noul",
+      "n": 250,
+      "accuracy": 0.816,
+      "ece": 0.0807,
+      "multiclass_brier": 0.284
+    },
+    "multinli": {
+      "type": "choice",
+      "n": 299,
+      "accuracy": 0.8294,
+      "ece": 0.089,
+      "multiclass_brier": 0.264,
+      "jsd": 0.1179,
+      "tvd": 0.2075
+    },
+    "civil_comments": {
+      "type": "noul",
+      "n": 300,
+      "accuracy": 0.8567,
+      "ece": 0.0966,
+      "multiclass_brier": 0.2445,
+      "jsd": 0.1,
+      "tvd": 0.1673
+    },
+    "aegis2": {
+      "type": "noul",
+      "n": 250,
+      "accuracy": 0.808,
+      "ece": 0.1467,
+      "multiclass_brier": 0.3216
+    },
+    "helpsteer2": {
+      "type": "score",
+      "n": 249,
+      "accuracy": 0.4137,
+      "ece": 0.3338,
+      "multiclass_brier": 0.8482,
+      "score_mae": 0.8812
+    },
+    "summeval-relevance": {
+      "type": "score",
+      "n": 240,
+      "accuracy": 0.4833,
+      "ece": 0.1378,
+      "multiclass_brier": 0.6596,
+      "score_mae": 0.6081
+    },
+    "summeval-consistency": {
+      "type": "score",
+      "n": 144,
+      "accuracy": 0.8681,
+      "ece": 0.1142,
+      "multiclass_brier": 0.2095,
+      "score_mae": 0.4163
+    },
+    "pubmedqa": {
+      "type": "choice",
+      "n": 250,
+      "accuracy": 0.736,
+      "ece": 0.1288,
+      "multiclass_brier": 0.3965
+    }
+  },
+  "averages": {
+    "all": {
+      "macro": 0.7709,
+      "micro": 0.7768
+    },
+    "choice": {
+      "macro": 0.8101,
+      "micro": 0.8063
+    },
+    "noul": {
+      "macro": 0.8414,
+      "micro": 0.8435
+    },
+    "score": {
+      "macro": 0.5884,
+      "micro": 0.5434
+    }
+  },
+  "published": {
+    "vitaminc-dev": {
+      "nimble-9b": {
+        "accuracy": 0.7659999999999999,
+        "ece": 0.172,
+        "multiclass_brier": 0.391,
+        "score_mae": null
+      },
+      "jev-1.13.0": {
+        "accuracy": 0.8009999999999999,
+        "ece": 0.104,
+        "multiclass_brier": 0.313,
+        "score_mae": null
+      }
+    },
+    "massive-en-US": {
+      "nimble-9b": {
+        "accuracy": 0.8690000000000001,
+        "ece": 0.061,
+        "multiclass_brier": 0.216,
+        "score_mae": null
+      },
+      "jev-1.13.0": {
+        "accuracy": 0.8740000000000001,
+        "ece": 0.075,
+        "multiclass_brier": 0.204,
+        "score_mae": null
+      }
+    },
+    "massive-de-DE": {
+      "nimble-9b": {
+        "accuracy": 0.8340000000000001,
+        "ece": 0.079,
+        "multiclass_brier": 0.256,
+        "score_mae": null
+      },
+      "jev-1.13.0": {
+        "accuracy": 0.8690000000000001,
+        "ece": 0.071,
+        "multiclass_brier": 0.215,
+        "score_mae": null
+      }
+    },
+    "boolq": {
+      "nimble-9b": {
+        "accuracy": 0.86,
+        "ece": 0.109,
+        "multiclass_brier": 0.245,
+        "score_mae": null
+      },
+      "jev-1.13.0": {
+        "accuracy": 0.897,
+        "ece": 0.038,
+        "multiclass_brier": 0.17,
+        "score_mae": null
+      }
+    },
+    "squad2": {
+      "nimble-9b": {
+        "accuracy": 0.8059999999999999,
+        "ece": 0.139,
+        "multiclass_brier": 0.314,
+        "score_mae": null
+      },
+      "jev-1.13.0": {
+        "accuracy": 0.8290000000000001,
+        "ece": 0.042,
+        "multiclass_brier": 0.224,
+        "score_mae": null
+      }
+    },
+    "paws": {
+      "nimble-9b": {
+        "accuracy": 0.828,
+        "ece": 0.1,
+        "multiclass_brier": 0.28,
+        "score_mae": null
+      },
+      "jev-1.13.0": {
+        "accuracy": 0.892,
+        "ece": 0.041,
+        "multiclass_brier": 0.174,
+        "score_mae": null
+      }
+    },
+    "multinli": {
+      "nimble-9b": {
+        "accuracy": 0.853,
+        "ece": 0.083,
+        "multiclass_brier": 0.211,
+        "score_mae": null
+      },
+      "jev-1.13.0": {
+        "accuracy": 0.8290000000000001,
+        "ece": 0.061,
+        "multiclass_brier": 0.228,
+        "score_mae": null
+      }
+    },
+    "civil_comments": {
+      "nimble-9b": {
+        "accuracy": 0.703,
+        "ece": 0.133,
+        "multiclass_brier": 0.413,
+        "score_mae": null
+      },
+      "jev-1.13.0": {
+        "accuracy": 0.81,
+        "ece": 0.056,
+        "multiclass_brier": 0.282,
+        "score_mae": null
+      }
+    },
+    "aegis2": {
+      "nimble-9b": {
+        "accuracy": 0.812,
+        "ece": 0.102,
+        "multiclass_brier": 0.289,
+        "score_mae": null
+      },
+      "jev-1.13.0": {
+        "accuracy": 0.804,
+        "ece": 0.048,
+        "multiclass_brier": 0.267,
+        "score_mae": null
+      }
+    },
+    "helpsteer2": {
+      "nimble-9b": {
+        "accuracy": 0.39,
+        "ece": 0.343,
+        "multiclass_brier": 0.894,
+        "score_mae": 0.962
+      },
+      "jev-1.13.0": {
+        "accuracy": 0.341,
+        "ece": 0.261,
+        "multiclass_brier": 0.844,
+        "score_mae": 0.967
+      }
+    },
+    "summeval-relevance": {
+      "nimble-9b": {
+        "accuracy": 0.49200000000000005,
+        "ece": 0.102,
+        "multiclass_brier": 0.678,
+        "score_mae": 0.698
+      },
+      "jev-1.13.0": {
+        "accuracy": 0.35,
+        "ece": 0.232,
+        "multiclass_brier": 0.774,
+        "score_mae": 0.77
+      }
+    },
+    "summeval-consistency": {
+      "nimble-9b": {
+        "accuracy": 0.757,
+        "ece": 0.177,
+        "multiclass_brier": 0.421,
+        "score_mae": 0.569
+      },
+      "jev-1.13.0": {
+        "accuracy": 0.812,
+        "ece": 0.079,
+        "multiclass_brier": 0.267,
+        "score_mae": 0.468
+      }
+    },
+    "pubmedqa": {
+      "nimble-9b": {
+        "accuracy": 0.7559999999999999,
+        "ece": 0.173,
+        "multiclass_brier": 0.407,
+        "score_mae": null
+      },
+      "jev-1.13.0": {
+        "accuracy": 0.772,
+        "ece": 0.129,
+        "multiclass_brier": 0.344,
+        "score_mae": null
+      }
+    }
+  },
+  "published_averages": {
+    "nimble-9b": {
+      "macro": 0.748,
+      "micro": 0.759
+    },
+    "jev-1.13.0": {
+      "macro": 0.76,
+      "micro": 0.773
+    }
+  },
+  "raw_vs_calibrated": {
+    "evaluation": "p_raw ~ p_cal^T recovered from saved rows; accuracy temperature-invariant",
+    "mean_ece_calibrated": 0.114,
+    "mean_ece_raw": 0.207,
+    "mean_brier_calibrated": 0.345,
+    "mean_brier_raw": 0.426
+  }
+}

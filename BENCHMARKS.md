@@ -237,6 +237,7 @@ BoolQ (0.057) and SQuAD 2 (0.058).
 | `probe_ctx_max.py` | pushes chat slots to a target context and reports VRAM headroom/stability |
 | `jev_bench.py` | runs any fixture through Jev (OpenRouter alpha `decisions`) capturing latency/tokens/cost per call |
 | `typed_decisions_bench.py` | replays the public `LocalLLaMA/typed-decisions` test split against any System One endpoint and computes leaderboard metrics |
+| `nimble_public_bench.py` | replays the Bespoke-Nimble public suite (13 subsets, 3,880 human-labeled records) through any System One endpoint with the authors' own validator/scorer; expected numbers in `nimble_public_expected.json` |
 
 ## Caveats
 
@@ -276,4 +277,12 @@ python benchmarks/probe_ctx_max.py 90000     # context/VRAM headroom probe
 python build_typesafe.py --source-dir "$SRC" \
   --selection .../source-selection.jsonl --output /tmp/typesafe102.jsonl
 python benchmarks/run_typesafe102.py http://localhost:8000 prima-ratio-gemma4-12b
+
+# Bespoke-Nimble public suite (section 6): clone bespokelabsai/nimble at 62076b4,
+# rebuild the 13 subsets with their converters (docs/PUBLIC_BENCHMARKS.md) and verify
+# them byte-identical against docs/assets/public-benchmarks/subsets/*-manifest.json,
+# then score every record through the endpoint (results vs nimble_public_expected.json):
+python benchmarks/nimble_public_bench.py \
+  --nimble-repo /path/to/nimble --data /path/to/nimble/data/public \
+  --output-dir /tmp/nimble-eval --endpoint http://localhost:8000/v1/systemone
 ```
