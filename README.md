@@ -66,6 +66,9 @@ curl http://localhost:8000/v1/models
   [NVIDIA container toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
 - 🧭 **Other ways to run it** — from source, custom CUDA builds, long contexts:
   **[RUNNING.md](RUNNING.md)**.
+- 🏷️ **Versioned images** — every release also tags its version
+  (`ghcr.io/andrea-tomassi/prima-ratio:0.3.2`); changelogs and history:
+  **[Releases](https://github.com/andrea-tomassi/prima-ratio/releases)**.
 
 ---
 
@@ -256,29 +259,6 @@ scored by their code:
   **0.3 points** (Nimble-9B: 3.5).
 - Comparison is against the authors' published numbers (Jev as shipped, Nimble at
   T=1); full protocol and caveats: **[BENCHMARKS.md](BENCHMARKS.md)**.
-
----
-
-## 📦 Releases & Docker image
-
-Prebuilt images on ghcr (public):
-
-```bash
-docker pull ghcr.io/andrea-tomassi/prima-ratio:latest
-```
-
-| Tag | Content |
-|---|---|
-| **`latest`** | **the single image** — decisions + chat + vision, full GPU offload |
-| `v0.3.0` | **prima-ratio**: single image, single engine; renamed built-ins (`:calibrated` / `:uncalibrated`) |
-| pre-0.3.0 | historical builds under the old distribution model |
-| `v0.2.2` | GPU support for Turing → Blackwell generations + concurrent chat ([release notes](https://github.com/andrea-tomassi/prima-ratio/releases/tag/v0.2.2)) |
-| `v0.2.1` | vision + long context ([release notes](https://github.com/andrea-tomassi/prima-ratio/releases/tag/v0.2.1)) |
-| `v0.2.0` | first local-engine distribution + calibration example ([release notes](https://github.com/andrea-tomassi/prima-ratio/releases/tag/v0.2.0)) |
-| `v0.1.0` | first release — System One + chat + automated calibration |
-
-Notes and changelogs: [Releases](https://github.com/andrea-tomassi/prima-ratio/releases).
-Benchmark comparisons (SemIf 4B / 27B exl3 / Jev): [BENCHMARKS.md](BENCHMARKS.md).
 
 ---
 
