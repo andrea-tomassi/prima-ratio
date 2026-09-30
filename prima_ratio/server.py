@@ -380,11 +380,15 @@ def systemone(req: Req):
             }
         else:  # score
             mean = sum(i * p for i, p in enumerate(probs))
+            k = len(probs)
+            pmax = max(probs)
+            conf = 1.0 if k <= 1 else max(0.0, (pmax - 1 / k) / (1 - 1 / k))
             answers[qid] = {
                 "type": "score",
                 "score": round(mean, 4),
                 "legend": legends[qid],
                 "probabilities": {i: round(p, 4) for i, p in zip(ids, probs)},
+                "confidence": round(conf, 4),
             }
     return {
         "model": req.model,
