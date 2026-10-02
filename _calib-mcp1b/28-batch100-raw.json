@@ -1,0 +1,802 @@
+{
+ "b001": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5228,
+   "service_account": 0.4772
+  },
+  "confidence": 0.0456
+ },
+ "b002": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5701,
+   "service_account": 0.4299
+  },
+  "confidence": 0.1403
+ },
+ "b003": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5658,
+   "service_account": 0.4342
+  },
+  "confidence": 0.1317
+ },
+ "b004": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.3928,
+   "service_account": 0.6072
+  },
+  "confidence": 0.2143
+ },
+ "b005": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5486,
+   "service_account": 0.4514
+  },
+  "confidence": 0.0972
+ },
+ "b006": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4133,
+   "service_account": 0.5867
+  },
+  "confidence": 0.1734
+ },
+ "b007": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5015,
+   "service_account": 0.4985
+  },
+  "confidence": 0.0031
+ },
+ "b008": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4558,
+   "service_account": 0.5442
+  },
+  "confidence": 0.0884
+ },
+ "b009": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4161,
+   "service_account": 0.5839
+  },
+  "confidence": 0.1678
+ },
+ "b010": {
+  "pick": "human",
+  "probs": {
+   "human": 0.527,
+   "service_account": 0.473
+  },
+  "confidence": 0.0539
+ },
+ "b011": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4008,
+   "service_account": 0.5992
+  },
+  "confidence": 0.1985
+ },
+ "b012": {
+  "pick": "human",
+  "probs": {
+   "human": 0.6237,
+   "service_account": 0.3763
+  },
+  "confidence": 0.2474
+ },
+ "b013": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4822,
+   "service_account": 0.5178
+  },
+  "confidence": 0.0356
+ },
+ "b014": {
+  "pick": "human",
+  "probs": {
+   "human": 0.556,
+   "service_account": 0.444
+  },
+  "confidence": 0.1121
+ },
+ "b015": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.3773,
+   "service_account": 0.6227
+  },
+  "confidence": 0.2454
+ },
+ "b016": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.3836,
+   "service_account": 0.6164
+  },
+  "confidence": 0.2328
+ },
+ "b017": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5322,
+   "service_account": 0.4678
+  },
+  "confidence": 0.0644
+ },
+ "b018": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.3061,
+   "service_account": 0.6939
+  },
+  "confidence": 0.3878
+ },
+ "b019": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5178,
+   "service_account": 0.4822
+  },
+  "confidence": 0.0357
+ },
+ "b020": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4657,
+   "service_account": 0.5343
+  },
+  "confidence": 0.0686
+ },
+ "b021": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5236,
+   "service_account": 0.4764
+  },
+  "confidence": 0.0472
+ },
+ "b022": {
+  "pick": "human",
+  "probs": {
+   "human": 0.6571,
+   "service_account": 0.3429
+  },
+  "confidence": 0.3142
+ },
+ "b023": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.3526,
+   "service_account": 0.6474
+  },
+  "confidence": 0.2949
+ },
+ "b024": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.3993,
+   "service_account": 0.6007
+  },
+  "confidence": 0.2014
+ },
+ "b025": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5046,
+   "service_account": 0.4954
+  },
+  "confidence": 0.0093
+ },
+ "b026": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4568,
+   "service_account": 0.5432
+  },
+  "confidence": 0.0864
+ },
+ "b027": {
+  "pick": "human",
+  "probs": {
+   "human": 0.526,
+   "service_account": 0.474
+  },
+  "confidence": 0.052
+ },
+ "b028": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4024,
+   "service_account": 0.5976
+  },
+  "confidence": 0.1953
+ },
+ "b029": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4654,
+   "service_account": 0.5346
+  },
+  "confidence": 0.0691
+ },
+ "b030": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.472,
+   "service_account": 0.528
+  },
+  "confidence": 0.056
+ },
+ "b031": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.3743,
+   "service_account": 0.6257
+  },
+  "confidence": 0.2515
+ },
+ "b032": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.2255,
+   "service_account": 0.7745
+  },
+  "confidence": 0.549
+ },
+ "b033": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5381,
+   "service_account": 0.4619
+  },
+  "confidence": 0.0762
+ },
+ "b034": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5673,
+   "service_account": 0.4327
+  },
+  "confidence": 0.1345
+ },
+ "b035": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4329,
+   "service_account": 0.5671
+  },
+  "confidence": 0.1343
+ },
+ "b036": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5272,
+   "service_account": 0.4728
+  },
+  "confidence": 0.0544
+ },
+ "xa200": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.3651,
+   "service_account": 0.6349
+  },
+  "confidence": 0.2697
+ },
+ "xa039": {
+  "pick": "human",
+  "probs": {
+   "human": 0.6624,
+   "service_account": 0.3376
+  },
+  "confidence": 0.3248
+ },
+ "xa010": {
+  "pick": "human",
+  "probs": {
+   "human": 0.6422,
+   "service_account": 0.3578
+  },
+  "confidence": 0.2844
+ },
+ "xa090": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5136,
+   "service_account": 0.4864
+  },
+  "confidence": 0.0271
+ },
+ "xa080": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5429,
+   "service_account": 0.4571
+  },
+  "confidence": 0.0858
+ },
+ "xa074": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.3854,
+   "service_account": 0.6146
+  },
+  "confidence": 0.2292
+ },
+ "xa047": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4233,
+   "service_account": 0.5767
+  },
+  "confidence": 0.1533
+ },
+ "xa036": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5967,
+   "service_account": 0.4033
+  },
+  "confidence": 0.1934
+ },
+ "xa167": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4705,
+   "service_account": 0.5295
+  },
+  "confidence": 0.059
+ },
+ "xa029": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5271,
+   "service_account": 0.4729
+  },
+  "confidence": 0.0542
+ },
+ "xa183": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.493,
+   "service_account": 0.507
+  },
+  "confidence": 0.014
+ },
+ "xa130": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4988,
+   "service_account": 0.5012
+  },
+  "confidence": 0.0024
+ },
+ "xa012": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4543,
+   "service_account": 0.5457
+  },
+  "confidence": 0.0913
+ },
+ "xa011": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4112,
+   "service_account": 0.5888
+  },
+  "confidence": 0.1777
+ },
+ "xa030": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5007,
+   "service_account": 0.4993
+  },
+  "confidence": 0.0013
+ },
+ "xa071": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4281,
+   "service_account": 0.5719
+  },
+  "confidence": 0.1438
+ },
+ "xa077": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5545,
+   "service_account": 0.4455
+  },
+  "confidence": 0.1089
+ },
+ "xa154": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4004,
+   "service_account": 0.5996
+  },
+  "confidence": 0.1992
+ },
+ "xa196": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4837,
+   "service_account": 0.5163
+  },
+  "confidence": 0.0325
+ },
+ "xa172": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5019,
+   "service_account": 0.4981
+  },
+  "confidence": 0.0038
+ },
+ "xa065": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.3359,
+   "service_account": 0.6641
+  },
+  "confidence": 0.3282
+ },
+ "xa188": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5285,
+   "service_account": 0.4715
+  },
+  "confidence": 0.057
+ },
+ "xa129": {
+  "pick": "human",
+  "probs": {
+   "human": 0.656,
+   "service_account": 0.344
+  },
+  "confidence": 0.312
+ },
+ "xa073": {
+  "pick": "human",
+  "probs": {
+   "human": 0.585,
+   "service_account": 0.415
+  },
+  "confidence": 0.17
+ },
+ "xa137": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4562,
+   "service_account": 0.5438
+  },
+  "confidence": 0.0876
+ },
+ "xa091": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4812,
+   "service_account": 0.5188
+  },
+  "confidence": 0.0377
+ },
+ "xa004": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.3619,
+   "service_account": 0.6381
+  },
+  "confidence": 0.2762
+ },
+ "xa054": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5639,
+   "service_account": 0.4361
+  },
+  "confidence": 0.1277
+ },
+ "xa184": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.3862,
+   "service_account": 0.6138
+  },
+  "confidence": 0.2275
+ },
+ "xa107": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5463,
+   "service_account": 0.4537
+  },
+  "confidence": 0.0927
+ },
+ "xa166": {
+  "pick": "human",
+  "probs": {
+   "human": 0.689,
+   "service_account": 0.311
+  },
+  "confidence": 0.378
+ },
+ "xa053": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4646,
+   "service_account": 0.5354
+  },
+  "confidence": 0.0708
+ },
+ "xa180": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5178,
+   "service_account": 0.4822
+  },
+  "confidence": 0.0355
+ },
+ "xa106": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4163,
+   "service_account": 0.5837
+  },
+  "confidence": 0.1674
+ },
+ "xa190": {
+  "pick": "human",
+  "probs": {
+   "human": 0.6265,
+   "service_account": 0.3735
+  },
+  "confidence": 0.2531
+ },
+ "xa181": {
+  "pick": "human",
+  "probs": {
+   "human": 0.6091,
+   "service_account": 0.3909
+  },
+  "confidence": 0.2182
+ },
+ "xa117": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4711,
+   "service_account": 0.5289
+  },
+  "confidence": 0.0578
+ },
+ "xa017": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4333,
+   "service_account": 0.5667
+  },
+  "confidence": 0.1333
+ },
+ "xa059": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5366,
+   "service_account": 0.4634
+  },
+  "confidence": 0.0731
+ },
+ "xa162": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4778,
+   "service_account": 0.5222
+  },
+  "confidence": 0.0444
+ },
+ "xa058": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4834,
+   "service_account": 0.5166
+  },
+  "confidence": 0.0331
+ },
+ "xa097": {
+  "pick": "human",
+  "probs": {
+   "human": 0.512,
+   "service_account": 0.488
+  },
+  "confidence": 0.024
+ },
+ "xa045": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.496,
+   "service_account": 0.504
+  },
+  "confidence": 0.008
+ },
+ "xa124": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5694,
+   "service_account": 0.4306
+  },
+  "confidence": 0.1387
+ },
+ "xa008": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4871,
+   "service_account": 0.5129
+  },
+  "confidence": 0.0258
+ },
+ "xa113": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5366,
+   "service_account": 0.4634
+  },
+  "confidence": 0.0731
+ },
+ "xa075": {
+  "pick": "human",
+  "probs": {
+   "human": 0.541,
+   "service_account": 0.459
+  },
+  "confidence": 0.082
+ },
+ "xa088": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4812,
+   "service_account": 0.5188
+  },
+  "confidence": 0.0375
+ },
+ "xa020": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5158,
+   "service_account": 0.4842
+  },
+  "confidence": 0.0316
+ },
+ "xa063": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5714,
+   "service_account": 0.4286
+  },
+  "confidence": 0.1428
+ },
+ "xa014": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4653,
+   "service_account": 0.5347
+  },
+  "confidence": 0.0694
+ },
+ "xa195": {
+  "pick": "human",
+  "probs": {
+   "human": 0.6572,
+   "service_account": 0.3428
+  },
+  "confidence": 0.3145
+ },
+ "xa050": {
+  "pick": "human",
+  "probs": {
+   "human": 0.523,
+   "service_account": 0.477
+  },
+  "confidence": 0.046
+ },
+ "xa128": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5748,
+   "service_account": 0.4252
+  },
+  "confidence": 0.1497
+ },
+ "xa100": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4914,
+   "service_account": 0.5086
+  },
+  "confidence": 0.0172
+ },
+ "xa099": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4521,
+   "service_account": 0.5479
+  },
+  "confidence": 0.0959
+ },
+ "xa061": {
+  "pick": "human",
+  "probs": {
+   "human": 0.581,
+   "service_account": 0.419
+  },
+  "confidence": 0.162
+ },
+ "xa093": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4365,
+   "service_account": 0.5635
+  },
+  "confidence": 0.1271
+ },
+ "xa032": {
+  "pick": "human",
+  "probs": {
+   "human": 0.5645,
+   "service_account": 0.4355
+  },
+  "confidence": 0.129
+ },
+ "xa110": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4416,
+   "service_account": 0.5584
+  },
+  "confidence": 0.1169
+ },
+ "xa186": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4909,
+   "service_account": 0.5091
+  },
+  "confidence": 0.0183
+ },
+ "xa142": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4936,
+   "service_account": 0.5064
+  },
+  "confidence": 0.0129
+ },
+ "xa104": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.3704,
+   "service_account": 0.6296
+  },
+  "confidence": 0.2592
+ },
+ "b999": {
+  "pick": "service_account",
+  "probs": {
+   "human": 0.4558,
+   "service_account": 0.5442
+  },
+  "confidence": 0.0885
+ }
+}
