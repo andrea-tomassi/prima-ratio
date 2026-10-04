@@ -11,7 +11,8 @@ captioning. Confidence you can classify, verify and gate on.
 It ships as **one Docker image, one engine in VRAM**: pull, run, done — the
 image sets itself up on first start and serves **typed text decisions**
 (yes/no, multiple-choice, scores) and **image-conditioned decisions** on the
-same weights. API-compatible with TypeSafe's System One / Jev pattern.
+same weights. API-compatible with TypeSafe's System One / Jev pattern
+and its open multimodal extension.
 
 Independent project; not affiliated with Cloudflare, TypeSafe, Jev or SemIf.
 
@@ -59,7 +60,7 @@ curl -s localhost:8000/v1/models
 
 | Endpoint | What |
 |---|---|
-| `POST /v1/systemone` | The decision endpoint: `state` (string, JSON, or content parts with images) + typed `questions` → probabilities for every option. |
+| `POST /v1/systemone` | The decision endpoint: `state` (string, JSON, or chat messages) + typed `questions` → probabilities for every option. Images ride in `images` or as message parts — see *System One conformance* below. |
 | `GET /v1/models` | The served model (OpenAI shape, `meta` carries engine info). |
 | `GET /healthz` | Liveness + model id. |
 
@@ -84,9 +85,50 @@ curl -s localhost:8000/v1/systemone -H "Content-Type: application/json" -d '{
 }'
 ```
 
-Each answer carries its probability distribution and a normalized-margin
-confidence. Images ride along as OpenAI-style content parts (`image_url` with
-base64 data URLs) or as a top-level `images` array of data URLs.
+## 🧭 System One conformance
+
+`POST /v1/systemone` follows the [TypeSafe System One API](https://docs.typesafe.ai)
+— the same contract as Jev — extended with the multimodal conventions of the
+[OpenJev Multimodal API](https://jev-skills.github.io/openjev-multimodal/api),
+the reference cited by the llama.cpp decision-model docs:
+
+- **`state`** — a string, a JSON object or array; a value that is not a string
+  is given to the model as JSON text. Message-shaped states are accepted too:
+  an array of chat messages, or an object with a `messages` array (metadata is
+  preserved).
+- **`images`** *(extension)* — an array of `data:image/...;base64,...` data
+  URLs (bare base64 strings are accepted too); `image_url` parts inside message
+  contents are read the same way (data URLs only). All images are placed before
+  the state in the prompt — the `images` field first, then the parts — and the
+  image parts are removed from the state.
+- **`questions`** — `choice` (2–255 options, `null` descriptions allowed),
+  `score` (2–10 ordered levels), `noul` (optional `true`/`false` criteria);
+  `instructions` can be a string, an object or an array. All questions are
+  decided together, in one forward pass.
+- **`answers`** — `noul`: the probability of `true`; `choice` and `score`: the
+  winning option or the expected level, the full distribution, and
+  `confidence` — the TypeSafe concentration measure:
+  `(n·pmax − 1) / (n − 1)` for choices, `1 − spread / evenSpread` for scores
+  (see [Confidence](https://docs.typesafe.ai/confidence)). `0` means the
+  options are equally likely.
+- **Local extensions** travel in extra fields (`x_prima`: latency and version)
+  and can be ignored by standard clients.
+
+Decisions conditioned on an image, the standard way:
+
+```bash
+curl -s localhost:8000/v1/systemone -H "Content-Type: application/json" -d '{
+  "state": "A document uploaded by a customer.",
+  "images": ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUg..."],
+  "questions": {
+    "kind": {
+      "type": "choice",
+      "instructions": "What kind of document is this?",
+      "criteria": {"invoice": null, "receipt": null, "contract": null, "other": null}
+    }
+  }
+}'
+```
 
 ## 📊 Benchmarks
 
@@ -121,6 +163,9 @@ any external exposure.
 - [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) — the project that
   inspired the original engine (v1.x). Thank you.
 - [TypeSafe](https://docs.typesafe.ai/api) — the System One API pattern.
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) — the `/v1/systemone`
+  reference implementation; [OpenJev Multimodal](https://jev-skills.github.io/openjev-multimodal/)
+  — the multimodal API reference.
 
 ## 📄 License
 

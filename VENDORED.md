@@ -18,7 +18,10 @@ What it provides:
 - `systemone` / `systemone_answer` — the SystemOne request/response mapping.
 
 No modifications. The service layer (model caching, HTTP endpoints, image
-data-URL decoding) lives in `prima_ratio/clef.py` and `prima_ratio/server.py`.
+data-URL decoding) lives in `prima_ratio/clef.py` and `prima_ratio/server.py`;
+the System One wire-standard conformance (message-part images, TypeSafe
+confidence formulas) is applied in `prima_ratio/standard.py` around the
+vendored call.
 
 ## History
 

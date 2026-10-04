@@ -5,8 +5,10 @@ images) and typed questions in, a calibrated probability for every option out �
 forward pass per request, no generation, no chat.
 
 Engine: Clef-Flash (Qwen3.5-9B backbone + joint schema head, nf4) with its vision
-tower. The model is already calibrated (raw ECE ≈ 0.02 on the public decision
-suites); probabilities are returned as-is.
+lens. The model is already calibrated (raw ECE ≈ 0.02 on the public decision
+suites); probabilities are returned as-is. Wire-standard conformance
+(message-part images, TypeSafe confidence formulas) is applied by
+`prima_ratio.standard` around the vendored engine call.
 """
 from __future__ import annotations
 
@@ -16,6 +18,8 @@ import os
 import time
 
 from fastapi import FastAPI, HTTPException
+
+from . import standard
 
 MODEL_ID = os.environ.get("PRIMA_MODEL_NAME", "prima-ratio-clef-flash")
 # 131072: the practical ceiling on a 16 GB card with the chunked prefill
@@ -72,12 +76,17 @@ def systemone_endpoint(request: dict) -> dict:
     body = dict(request)
     if not isinstance(body.get("model"), str):
         body["model"] = MODEL_ID
+    try:
+        body = standard.normalize_request(body)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     raw = body.get("images") or []
     if raw:
         body["images"] = _decode_images(raw)
     try:
         started = time.perf_counter()
         response = systemone(load()[0], load()[1], body, max_length=MAX_LENGTH)
+        response = standard.normalize_response(response)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except RuntimeError as error:
