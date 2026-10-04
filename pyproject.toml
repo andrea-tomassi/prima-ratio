@@ -1,20 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "prima-ratio"
-version = "0.3.0"
-description = "A local, single-model System One endpoint: typed decisions with calibrated probabilities, chat and vision on one GPU."
+version = "2.0.0"
+description = "Turn-key System One decision service — typed decisions with calibrated probabilities and vision, in one Docker container"
 readme = "README.md"
-license = {file = "LICENSE"}
 requires-python = ">=3.10"
+license = { text = "MIT" }
 dependencies = [
-  "fastapi==0.121.0",
-  "uvicorn==0.54.0",
-  "llama-cpp-python==0.3.35",
-  "transformers==5.17.0",
-  "numpy>=1.26",
+    "torch>=2.11",
+    "torchvision",
+    "transformers>=5.10",
+    "bitsandbytes>=0.45",
+    "accelerate",
+    "safetensors",
+    "huggingface_hub",
+    "pillow",
+    "fastapi",
+    "uvicorn",
 ]
-
-[project.optional-dependencies]
-test = ["pytest==8.4.2"]
 
 [tool.setuptools.packages.find]
 include = ["prima_ratio*"]

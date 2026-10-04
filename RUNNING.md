@@ -1,140 +1,40 @@
-# 🧭 Other ways to run prima-ratio
+# Running prima-ratio
 
-The [Quick Start](README.md) is the base way: one `docker run`, done.
-This file collects everything else.
-
-## 🔧 From source
+## Docker (recommended)
 
 ```bash
-git clone https://github.com/andrea-tomassi/prima-ratio && cd prima-ratio
-docker compose up -d          # builds and binds :8000
-curl http://localhost:8000/v1/models
-```
-
-## 📦 The GGUF model file
-
-llama.cpp does the forward pass on the model's GGUF file — scoring **and** chat
-share the loaded weights:
-
-```bash
-docker run -d --gpus all -p 8000:8000 --restart unless-stopped \
-  -v ~/.cache/huggingface:/cache/huggingface \
-  -v /path/to/models:/models:ro \
-  -e PRIMA_GGUF=/models/gemma-4-12b-it-UD-Q6_K_XL.gguf \
+docker run -d --name prima-ratio --gpus all \
+  -p 8000:8000 \
+  -v prima-cache:/cache \
   ghcr.io/andrea-tomassi/prima-ratio:latest
 ```
 
-At startup the image verifies that the mounted checkpoint is the expected
-model — a mismatch stops the server instead of serving quietly wrong
-decisions. Full GPU offload is already the default; set
-`PRIMA_LLAMA_GPU_LAYERS=0` for CPU-only runs.
+First start downloads the engine (~8 GB: nf4 weights + joint head + vision)
+into `/cache`. Keep the cache mounted: restarts and image upgrades reuse it.
 
-## 👁️ Vision — images in chat and decisions
+## Environment
 
-Mount the projector:
-
-```bash
-  -v /path/to/models:/models:ro \
-  -e PRIMA_MMPROJ=/models/mmproj-F16.gguf
-```
-
-Chat understands images through OpenAI-style content parts (base64 data URLs):
-
-```json
-{"messages": [{"role": "user", "content": [
-  {"type": "text", "text": "What does the image say?"},
-  {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}]}]}
-```
-
-`GET /v1/models` reports `"vision": true` on the chat entry when the projector
-is loaded.
-
-The same images work in **decisions** (GGUF backend only): give `state` as
-content parts and the option logits are read **conditioned on the image** — no
-caption step in between:
-
-```json
-{"state": [{"type": "text", "text": "Inspect the receipt."},
-           {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}],
- "model": "prima-ratio-gemma4-12b",
- "questions": {"over": {"type": "choice", "instructions": "Is the total over 100?",
-                          "criteria": {"yes": "over 100", "no": "not over 100"}}}}
-```
-
-Multiple questions in one request share the image. Calibration works the same
-way: labeled rows with image states fit a temperature for the visual workload.
-The captcha demo in the [README](README.md) shows it end to end.
-
-## 🧠 Long contexts on a small card
-
-The context is configurable — `PRIMA_MAX_TOKENS` for decisions,
-`PRIMA_CHAT_TOKENS` for chat. A 150K-token scoring context fits a 16 GB GPU
-alongside the chat slots and vision (verified; retrieval correct at 27K
-depth). The settings for that reference point:
-
-```bash
-  -e PRIMA_MAX_TOKENS=150000 \
-  -e PRIMA_KV_TYPE_K=q8_0 -e PRIMA_KV_TYPE_V=q8_0 \
-  -e PRIMA_SWA_FULL=0
-```
-
-`PRIMA_SWA_FULL=0` switches sliding-window layers to a window-sized cache (the
-upstream full-size default makes KV memory grow with the whole context);
-`PRIMA_KV_TYPE_*` halves the remaining KV and enables flash attention.
-
-## 🔀 Concurrency
-
-`PRIMA_PARALLEL` (default `1`) sets how many chat/vision generations run at
-once on the shared weights — llama.cpp `--parallel` semantics. The total chat
-context (`PRIMA_CHAT_TOKENS`, default 200K) is split evenly across the slots:
-one slot gets the whole budget, two slots get half each. A request that
-exceeds its slot's share is refused with a **400 that explains the budget**
-(never silently truncated). Decisions are single 130 ms forwards and stay
-serialized; vision generation queues behind the projector.
-
-## 🏗️ Which GPUs? — custom CUDA builds
-
-The GGUF image compiles llama.cpp's CUDA kernels for **Turing → Blackwell in
-one build** (default: `75;80;86;89;90;120` + a `120` PTX target for forward
-compatibility — RTX 20/30/40/50, A100, H100 all run native SASS). Rebuild with
-a narrower list for a faster build and a smaller image, or extend it for other
-targets:
-
-```bash
-docker build -f Dockerfile --build-arg CUDA_ARCHS="86;89" -t my/prima-ratio:latest .
-```
-
-| GPU family | `CUDA_ARCHS` |
-|---|---|
-| Turing (RTX 20, T4) | `75` |
-| Ampere (RTX 30, A100) | `86` / `80` |
-| Ada (RTX 40, L4) | `89` |
-| Hopper (H100) | `90` |
-| Blackwell (RTX 50) | `120` |
-| future GPUs | `120-virtual` (PTX, JIT at load) |
-
-Note: **DGX Spark (GB10) is ARM64** — it needs an `arm64` build of this image
-(same Dockerfile, built on/for that machine), not the amd64 image.
-
-About 200 MB of SASS per architecture; the default multi-arch build takes
-~40–60 min on 12 cores (cap jobs with `--build-arg BUILD_PARALLEL=8` on
-low-RAM builders).
-
-## ⚙️ Configuration
-
-Everything has sane defaults — this is the full reference for tuning:
-
-| Variable | Default | Purpose |
+| Variable | Default | Meaning |
 |---|---|---|
-| `PRIMA_ENGINE` | `12B_VISION` | engine to serve (12B, 4B, 4B_VISION: roadmap) |
-| `PRIMA_CACHE` | `/cache` | engine + tokenizer cache folder — mount it to persist |
-| `PRIMA_GGUF` / `PRIMA_MMPROJ` | — | explicit asset paths (override the engine) |
-| `PRIMA_MAX_TOKENS` | `4096` | scoring context budget |
-| `PRIMA_CHAT_TOKENS` | `200000` | total chat/vision context, split across slots |
-| `PRIMA_PARALLEL` | `1` | concurrent chat/vision generation slots |
-| `PRIMA_KV_TYPE_K` / `PRIMA_KV_TYPE_V` | `f16` | KV cache type — `q8_0` halves KV memory |
-| `PRIMA_SWA_FULL` | `1` | `0` = window-sized cache, for 100K+ contexts on consumer GPUs |
-| `PRIMA_LLAMA_GPU_LAYERS` | `-1` | GPU offload: `0` CPU, `-1` all layers |
-| `PRIMA_CALIBRATED_TEMPERATURE` | `3.4` | built-in `:calibrated` fit |
-| `PRIMA_MODEL_NAME` | `prima-ratio-gemma4-12b` | model-id base for variants |
-| `PRIMA_MANIFEST` | `build/calibration-manifest.json` | calibration state file (mount it, back it up) |
+| `PRIMA_MODEL_NAME` | `prima-ratio-clef-flash` | model id served by `/v1/models` |
+| `PRIMA_MODEL_REPO` | `meossistant/clef-flash-4bit` | weights to download on first start |
+| `PRIMA_MODEL_PATH` | — | explicit local model directory (skips the cache/download) |
+| `PRIMA_CACHE` | `/cache` | model + HF cache root — mount it |
+| `PRIMA_DEVICE` | `cuda` | torch device |
+| `PRIMA_MAX_LENGTH` | `16384` | decision context, in tokens |
+| `PRIMA_PORT` / `PRIMA_HOST` | `8000` / `0.0.0.0` | HTTP bind |
+
+## GPU
+
+Any NVIDIA card with ≥ 8 GB VRAM (the model runs in ~8 GB at nf4). The pip
+torch wheels bundle their CUDA runtime: no host CUDA toolkit needed, only a
+recent driver (`--gpus all`).
+
+## Without Docker
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+pip install .
+PRIMA_CACHE=./cache python -m prima_ratio
+```

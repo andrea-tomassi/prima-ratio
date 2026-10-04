@@ -1,16 +1,19 @@
 prima-ratio
 Copyright (c) 2026 Andrea Tomassi
 
-This product includes software adapted from SemIf
-(https://github.com/TheoLeeCJ/SemIf-OpenJev), MIT licence,
-commit 23cf1f39fc9534fe81437200959b6dfc7106e45a.
+This product includes software from Clef (Cloudflare), Apache License 2.0:
+  https://huggingface.co/Cloudflare/clef-flash
 
-The vendored modules under prima_ratio/engine/ (prompts, encoding, prefix,
-llamacpp) implement SemIf's direct option-logit decision method: prompt
-contract, single-token answer-slot verification, shared-state prefix reuse and
-the llama.cpp scoring backend. Divergences from upstream (Torch/MLX paths
-removed; opt-in GPU offload, KV-cache type and window-sized SWA cache;
-chat/vision/calibration layers) are listed in VENDORED.md.
+The vendored module prima_ratio/engine/joint_schema_model.py is kept verbatim
+from the Clef-Flash release: it implements the record encoding (state, typed
+questions, option spans, images/videos), the joint schema head and the
+SystemOne request/response mapping. See VENDORED.md for details.
 
-prima-ratio is an independent project, not affiliated with or endorsed by
-SemIf, TypeSafe or Jev.
+The served weights (nf4 quantization of Clef-Flash with the joint head) come
+from https://huggingface.co/meossistant/clef-flash-4bit, itself a quantization
+of Cloudflare's Clef-Flash (Apache-2.0).
+
+prima-ratio's decision-service lineage — a local, calibrated, Jev-shaped
+System One — started from SemIf (https://github.com/TheoLeeCJ/SemIf-OpenJev,
+MIT). prima-ratio is an independent project, not affiliated with or endorsed
+by Cloudflare, TypeSafe, Jev or SemIf.

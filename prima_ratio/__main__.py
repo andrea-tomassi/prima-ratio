@@ -1,17 +1,12 @@
-"""`python -m prima_ratio` — start the HTTP server."""
-
-from __future__ import annotations
-
+"""Entry point: `python -m prima_ratio` runs the HTTP service."""
 import os
+
+import uvicorn
 
 
 def main() -> None:
-    import uvicorn
-
-    from .server import app
-
     uvicorn.run(
-        app,
+        "prima_ratio.server:app",
         host=os.environ.get("PRIMA_HOST", "0.0.0.0"),
         port=int(os.environ.get("PRIMA_PORT", "8000")),
         log_level=os.environ.get("PRIMA_LOG_LEVEL", "info"),

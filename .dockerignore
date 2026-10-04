@@ -4,6 +4,8 @@ build/
 benchmarks/
 assets/
 calibration/
+_calib-*
+CONFRONTO-MOTORI.md
 *.md
 !README.md
 __pycache__/

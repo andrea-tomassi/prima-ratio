@@ -1,68 +1,52 @@
-# syntax=docker/dockerfile:1
-# ---------------------------------------------------------------------------
-# prima-ratio — one image: decisions + chat + vision on a single GPU.
-# Multi-stage: nvcc only in the builder; the runtime carries the CUDA runtime
-# libraries plus the finished venv. Engine assets are not baked into the image —
-# they download into /cache on first start (mount /cache to keep them).
+# prima-ratio 2.0.0 — turn-key System One decision service.
 #
-#   docker run --gpus all -p 8000:8000 \
-#     -v prima-cache:/cache -v ./build:/app/build \
-#     ghcr.io/andrea-tomassi/prima-ratio:latest
-# ---------------------------------------------------------------------------
-FROM nvidia/cuda:12.9.1-devel-ubuntu22.04 AS builder
+# Engine: Clef-Flash nf4 (Qwen3.5-9B backbone + joint schema head + vision tower),
+# served by torch + bitsandbytes. The pip torch wheels bundle their own CUDA
+# runtime libraries, so a lean Ubuntu base is enough — the NVIDIA container
+# runtime injects the driver at run time (`--gpus all`).
+FROM ubuntu:24.04
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3.10 python3.10-venv python3.10-dev build-essential ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/venv
 
-ENV UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy
-
-# CUDA arch must be pinned explicitly: the build container has no GPU, so the
-# "native" detection falls back to a 5.2 PTX target and every kernel is
-# JIT-compiled at runtime (~3x slower). Default list covers Turing -> Hopper
-# and Blackwell natively (RTX 20/30/40/50, A100, H100) plus a 120 PTX target
-# for forward compatibility. Narrow it for a faster build / smaller image.
-ARG CUDA_ARCHS="75;80;86;89;90;120;120-virtual"
-# GGML_NATIVE=off: CI runners may carry newer instruction sets (e.g. AVX-512) that
-# consumer hosts lack — a "native" build crashes with SIGILL there. Build portable.
-ENV CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS} -DGGML_NATIVE=off"
-# nvcc is memory-hungry: cap parallel compile jobs on low-RAM builders
-ARG BUILD_PARALLEL=8
-ENV CMAKE_BUILD_PARALLEL_LEVEL=${BUILD_PARALLEL}
-
-RUN uv venv /opt/venv --python python3.10
-ENV VIRTUAL_ENV=/opt/venv \
-    PATH="/opt/venv/bin:$PATH"
-
-COPY pyproject.toml /build/pyproject.toml
-COPY LICENSE /build/LICENSE
-COPY README.md /build/README.md
-COPY prima_ratio /build/prima_ratio
-RUN uv pip install --no-cache /build \
-    && rm -rf /root/.cache/uv /root/.cache/pip /build
-
-# note: `import llama_cpp` is NOT run at build time — its libraries link against
-# libcuda.so.1, which only exists at runtime through the NVIDIA container toolkit.
-
-# ---------------------------------------------------------------------------
-FROM nvidia/cuda:12.9.1-runtime-ubuntu22.04
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3.10 libgomp1 ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=builder /opt/venv /opt/venv
-
-ENV VIRTUAL_ENV=/opt/venv \
-    PATH="/opt/venv/bin:$PATH" \
-    HF_HOME=/cache/huggingface \
-    PRIMA_MANIFEST=/app/build/calibration-manifest.json \
-    PRIMA_LLAMA_GPU_LAYERS=-1
+ENV PATH="/opt/venv/bin:${PATH}"
 
 WORKDIR /app
-RUN mkdir -p /cache/engine /cache/huggingface
+COPY pyproject.toml README.md LICENSE NOTICE /app/
+COPY prima_ratio /app/prima_ratio
+
+# torch first (its own index), then flash-attention 2 (prebuilt wheel for this
+# exact torch/cu126/cp312 combo — see the repo's releases), then the package.
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu126 \
+    && pip install --no-cache-dir einops ninja \
+    && pip install --no-cache-dir "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.10.0/flash_attn-2.6.3%2Bcu126torch2.14-cp312-cp312-linux_x86_64.whl" \
+    && pip install --no-cache-dir .
+
+# gcc: bitsandbytes compiles its nf4 kernels through triton at first use
+# (runtime need — a late layer keeps the pip layers cached).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# The model (~8 GB, nf4 + joint head) is downloaded on first start into the cache:
+# mount /cache and it survives restarts and image upgrades.
+ENV PRIMA_CACHE=/cache \
+    HF_HOME=/cache/huggingface \
+    TRITON_CACHE_DIR=/cache/triton \
+    PRIMA_PORT=8000 \
+    PRIMA_MODEL_NAME=prima-ratio-clef-flash
+
+VOLUME ["/cache"]
 EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=600s \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4)"
+
 CMD ["python", "-m", "prima_ratio"]
