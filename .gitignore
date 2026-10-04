@@ -14,3 +14,6 @@ __pycache__/
 .venv/
 *.pyc
 *.log
+
+# calibration artifacts (private benchmark data) — never commit
+_calib-*/
