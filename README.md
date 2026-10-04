@@ -33,6 +33,9 @@ Independent project; not affiliated with Cloudflare, TypeSafe, Jev or SemIf.
 - 🧠 **One forward pass.** No sampling, no reasoning tokens, no generation:
   latency is one prefill — a few hundred milliseconds per decision on a 16 GB
   consumer card.
+- 📏 **Long context, unlocked.** A chunked prefill feeds the backbone in 4K
+  slices while the hybrid cache is carried across them — **~95K-token states
+  on a 16 GB card**, with probabilities identical to the one-shot path.
 - 🧰 **Decisions only, on purpose.** One endpoint, one contract: if you need a
   chat model, run a chat model.
 

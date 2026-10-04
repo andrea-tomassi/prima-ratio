@@ -6,6 +6,10 @@
 # runtime injects the driver at run time (`--gpus all`).
 FROM ubuntu:24.04
 
+# flash-attention 2 ships a prebuilt wheel for this exact torch/cu126/cp312 combo
+# on x86_64 only — arm64 falls back to sdpa (the server detects it at load time).
+ARG TARGETARCH=amd64
+
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
@@ -26,7 +30,7 @@ COPY prima_ratio /app/prima_ratio
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu126 \
     && pip install --no-cache-dir einops ninja \
-    && pip install --no-cache-dir "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.10.0/flash_attn-2.6.3%2Bcu126torch2.14-cp312-cp312-linux_x86_64.whl" \
+    && if [ "$TARGETARCH" = "amd64" ]; then pip install --no-cache-dir "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.10.0/flash_attn-2.6.3%2Bcu126torch2.14-cp312-cp312-linux_x86_64.whl"; fi \
     && pip install --no-cache-dir .
 
 # gcc: bitsandbytes compiles its nf4 kernels through triton at first use

@@ -18,8 +18,10 @@ import time
 from fastapi import FastAPI, HTTPException
 
 MODEL_ID = os.environ.get("PRIMA_MODEL_NAME", "prima-ratio-clef-flash")
-MAX_LENGTH = int(os.environ.get("PRIMA_MAX_LENGTH", "16384"))
-VERSION = "2.0.0"
+# 131072: the practical ceiling on a 16 GB card with the chunked prefill
+# (~95K measured at 14.6 GB); bigger cards can raise it up to the model's 262144.
+MAX_LENGTH = int(os.environ.get("PRIMA_MAX_LENGTH", "131072"))
+VERSION = "2.0.1"
 
 app = FastAPI(title="prima-ratio", version=VERSION, docs_url=None, redoc_url=None)
 
@@ -78,5 +80,19 @@ def systemone_endpoint(request: dict) -> dict:
         response = systemone(load()[0], load()[1], body, max_length=MAX_LENGTH)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        if "out of memory" in str(error).lower():
+            try:
+                import torch
+
+                torch.cuda.empty_cache()
+            except Exception:  # noqa: BLE001 - best-effort recovery, then report
+                pass
+            raise HTTPException(
+                status_code=507,
+                detail="insufficient GPU memory for this state; lower PRIMA_MAX_LENGTH "
+                "or PRIMA_PREFILL_CHUNK, or shorten the state",
+            ) from error
+        raise
     response["x_prima"] = {"latency_s": round(time.perf_counter() - started, 3), "version": VERSION}
     return response
