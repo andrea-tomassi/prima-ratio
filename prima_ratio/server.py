@@ -583,7 +583,7 @@ def _gguf_split_images(messages: list[dict]):
                     blobs.append(base64.b64decode(url.partition(",")[2]))
                 except Exception as error:
                     raise HTTPException(status_code=400, detail="invalid base64 image payload") from error
-                parts.append({"type": "text", "text": marker})
+                parts.append({"type": "image"})
             else:
                 parts.append(part)
         converted.append({**message, "content": parts})
@@ -821,14 +821,55 @@ def _state_text_and_images(state) -> tuple[str, list[bytes]]:
     return "\n".join(chunks), blobs
 
 
-def _vision_prompt(state_text: str, row: dict) -> str:
+# Image placeholders emitted by a model's chat template when a real image part
+# is present. They are swapped for mtmd's marker before multimodal tokenization,
+# so every family keeps its own vision delimiters (Gemma <|image|>, Qwen3.5-VL
+# <|vision_start|><|image_pad|><|vision_end|>, ...).
+_VISION_TEMPLATE_PLACEHOLDERS = ("<|image_pad|>", "<|image|>", "<start_of_image>")
+
+
+def _vision_markerize(prompt: str) -> str:
+    import llama_cpp.mtmd_cpp as mtmd
+
+    marker = mtmd.mtmd_default_marker().decode("utf-8")
+    for token in _VISION_TEMPLATE_PLACEHOLDERS:
+        prompt = prompt.replace(token, marker)
+    return prompt
+
+
+def _vision_prompt(state, row: dict) -> str:
+    """Render the vision-decisions prompt through the model's own chat template.
+
+    The state's image parts stay real image parts so the template emits its
+    family's vision tokens; placeholders are then swapped for mtmd's marker.
+    """
     options = " ".join(
         f"{LETTERS[index]}) {option['description']}" for index, option in enumerate(row["options"]))
-    return (
-        "<bos><|turn>user\n"
-        f"{state_text}\n\n{row['question']}\nOptions: {options}\n"
-        "Answer with a single letter, nothing else.\n<turn|>\n<|turn>model\n" + VISION_ANSWER_CUE
-    )
+    content: list[dict] = []
+    if isinstance(state, list):
+        for part in state:
+            if not isinstance(part, dict):
+                raise HTTPException(status_code=400, detail="each state part must be an object")
+            if part.get("type") == "image_url":
+                content.append({"type": "image"})
+            elif part.get("type") == "text":
+                content.append({"type": "text", "text": str(part.get("text", ""))})
+            else:
+                raise HTTPException(status_code=400,
+                                    detail=f"unsupported state part type: {part.get('type')!r}")
+    else:
+        content.append({"type": "text",
+                        "text": state if isinstance(state, str) else json.dumps(state, ensure_ascii=False)})
+    content.append({"type": "text", "text": (
+        f"\n\n{row['question']}\nOptions: {options}\nAnswer with a single letter, nothing else.")})
+    try:
+        prompt = tokenizer.apply_chat_template(
+            [{"role": "user", "content": content}], tokenize=False,
+            add_generation_prompt=True, enable_thinking=False)
+    except TypeError:
+        prompt = tokenizer.apply_chat_template(
+            [{"role": "user", "content": content}], tokenize=False, add_generation_prompt=True)
+    return _vision_markerize(prompt)
 
 
 def _gguf_vision_score_rows(rows: list[dict], max_tokens: int):
@@ -860,7 +901,7 @@ def _gguf_vision_score_rows(rows: list[dict], max_tokens: int):
                     tokenizer.encode(VISION_ANSWER_CUE, add_special_tokens=False) + [slots[letter]]:
                 raise HTTPException(status_code=400,
                                     detail=f"answer boundary shifts tokenization for option {letter!r}")
-        prompt = _vision_prompt(state_text, row)
+        prompt = _vision_prompt(row.get("state"), row)
         with _VISION_LOCK:
             vision, chunks, bitmaps, prompt_tokens = _gguf_vision_prepare(prompt, blobs, add_special=False)
             try:
@@ -919,6 +960,8 @@ def _gguf_chat_completions(req: ChatReq):
             template_kwargs.pop("tools", None)
             template_kwargs.pop("tool_choice", None)
             prompt = tokenizer.apply_chat_template(messages, **template_kwargs)
+    if images:
+        prompt = _vision_markerize(prompt)
 
     t0 = time.perf_counter()
     import numpy
