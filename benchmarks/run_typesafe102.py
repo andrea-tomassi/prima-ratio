@@ -6,7 +6,7 @@ import json, statistics, sys, time, urllib.request
 from collections import defaultdict
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000"
-MODEL = sys.argv[2] if len(sys.argv) > 2 else "semif-gemma4-12b"
+MODEL = sys.argv[2] if len(sys.argv) > 2 else "prima-ratio-clef-flash"
 GOLD = "/home/j3st3r/ts102/typesafe102.jsonl"
 COMMITTED_4B = "/home/j3st3r/semif-poc/src/results/raw/predictions/direct-typesafe102.jsonl"
 OUT = "/home/j3st3r/ts102/predictions-gemma.jsonl"

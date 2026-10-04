@@ -140,7 +140,7 @@ Full tables, harnesses and reproduction notes live in
 |---|---|
 | Bespoke-Nimble (13 subsets, 3,880 records) | **76.6 % macro / 77.6 % micro** |
 | Typed-decisions (400 cases) | **Acc 0.70 · ECE 0.018 · W1 0.97** |
-| Email triage (195 real emails, binary malice) | **AUC 0.994 · 1.8 % false alarms at 100 % recall** |
+| Email triage (195 real emails, binary malice) | **AUC 0.993–0.994 · 1.8–2.5 % false alarms at 100 % recall** (stack-dependent — see [BENCHMARKS.md](BENCHMARKS.md)) |
 | Mermaid syntax (100 diagrams) | **74 %** |
 | Decision latency | **~0.3 s** per record, one forward pass |
 

@@ -4,7 +4,7 @@ split against any System One endpoint (prima-ratio or Jev) and compute the
 leaderboard metrics: Acc, Soft acc, KL, TV, Brier, ECE, Score MAE, Within-1, ms/case.
 
 Usage:
-  python typed_decisions_bench.py --source server --base http://127.0.0.1:8000 --model semif-gemma4-12b
+  python typed_decisions_bench.py --source server --base http://127.0.0.1:8000 --model prima-ratio-clef-flash
   python typed_decisions_bench.py --source jev --limit 40        # needs OPENROUTER_API_KEY
 """
 import argparse, json, math, os, statistics, sys, time, urllib.request
@@ -132,7 +132,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", choices=("server", "jev"), default="server")
     ap.add_argument("--base", default="http://127.0.0.1:8000")
-    ap.add_argument("--model", default="semif-gemma4-12b")
+    ap.add_argument("--model", default="prima-ratio-clef-flash")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--out", default="")
     ap.add_argument("--save-raw", default="")

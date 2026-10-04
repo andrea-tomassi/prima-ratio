@@ -22,7 +22,7 @@ Usage:
   python nimble_public_bench.py --nimble-repo /path/to/nimble \
       --data /path/to/nimble/data/public --output-dir evaluations/nimble \
       [--endpoint http://HOST:8000/v1/systemone] \
-      [--model prima-ratio-gemma4-12b:calibrated] [--concurrency 1] \
+      [--model prima-ratio-clef-flash] [--concurrency 1] \
       [--subsets vitaminc-dev,boolq,...]
 """
 
@@ -35,7 +35,7 @@ SUBSETS = ["vitaminc-dev", "massive-en-US", "massive-de-DE", "boolq", "squad2", 
            "multinli", "civil_comments", "aegis2", "helpsteer2", "summeval-relevance",
            "summeval-consistency", "pubmedqa"]
 DEFAULT_ENDPOINT = "http://127.0.0.1:8000/v1/systemone"
-DEFAULT_MODEL = "prima-ratio-gemma4-12b:calibrated"
+DEFAULT_MODEL = "prima-ratio-clef-flash"
 
 
 def build_transport(epj, endpoint):

@@ -4,7 +4,7 @@ import json, sys, time, urllib.request
 from collections import Counter, defaultdict
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000"
-MODEL = sys.argv[2] if len(sys.argv) > 2 else "semif-gemma4-12b"
+MODEL = sys.argv[2] if len(sys.argv) > 2 else "prima-ratio-clef-flash"
 ROWS = "/home/j3st3r/semif-poc/src/benchmarks/data/shape777.jsonl"
 PRED = "/home/j3st3r/semif-poc/src/results/raw/shape777-direct.predictions.jsonl"
 OUT = "/home/j3st3r/semif-poc/shape777-grouped.jsonl"
