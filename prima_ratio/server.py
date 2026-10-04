@@ -25,7 +25,7 @@ MODEL_ID = os.environ.get("PRIMA_MODEL_NAME", "prima-ratio-clef-flash")
 # 131072: the practical ceiling on a 16 GB card with the chunked prefill
 # (~95K measured at 14.6 GB); bigger cards can raise it up to the model's 262144.
 MAX_LENGTH = int(os.environ.get("PRIMA_MAX_LENGTH", "131072"))
-VERSION = "2.0.1"
+VERSION = "2.0.2"
 
 app = FastAPI(title="prima-ratio", version=VERSION, docs_url=None, redoc_url=None)
 

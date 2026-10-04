@@ -1,4 +1,4 @@
-# prima-ratio 2.0.0 — turn-key System One decision service.
+# prima-ratio 2.0.2 — turn-key System One decision service.
 #
 # Engine: Clef-Flash nf4 (Qwen3.5-9B backbone + joint schema head + vision tower),
 # served by torch + bitsandbytes. The pip torch wheels bundle their own CUDA
