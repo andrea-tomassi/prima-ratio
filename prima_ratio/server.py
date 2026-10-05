@@ -9,13 +9,6 @@ lens. The model is already calibrated (raw ECE ≈ 0.02 on the public decision
 suites); probabilities are returned as-is. Wire-standard conformance
 (message-part images, confidence formulas) is applied by
 `prima_ratio.standard` around the vendored engine call.
-
-Two surfaces are served:
-
-- `/v1/systemone` — the flat Jev/System One body (`model`, `answers`, `usage`).
-- `/client/v4/accounts/{account_id}/ai/run[/@cf/cloudflare/clef-flash]` — a
-  drop-in for the hosted Cloudflare Workers AI endpoint: same request, the
-  response wrapped in the CF envelope (`result`, `success`, `errors`, `messages`).
 """
 from __future__ import annotations
 
@@ -25,7 +18,6 @@ import os
 import time
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
 
 from . import standard
 
@@ -118,59 +110,3 @@ def _execute(request: dict) -> dict:
 @app.post("/v1/systemone")
 def systemone_endpoint(request: dict) -> dict:
     return _execute(request)
-
-
-# ---- Cloudflare Workers AI-compatible surface --------------------------------
-# Drop-in for the hosted `@cf/cloudflare/clef-flash` endpoint: same request
-# body, same core, response wrapped in the CF envelope
-# {"result": {...}, "success": true, "errors": [], "messages": []}.
-
-
-def _cf_wrap(request: dict, *, universal: bool = False):
-    body = dict(request)
-    if universal:
-        # The universal route nests the model schema under `input` and uses the
-        # full model id — same contract as the hosted endpoint (400 otherwise).
-        schema = body.get("input")
-        if not isinstance(schema, dict):
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "result": None,
-                    "success": False,
-                    "errors": [{"code": 7000, "message": "Invalid request body: input"}],
-                    "messages": [],
-                },
-            )
-        body = dict(schema)
-        if not isinstance(body.get("model"), str):
-            outer = request.get("model")
-            body["model"] = outer if isinstance(outer, str) else "clef-flash"
-    model = body.get("model")
-    if isinstance(model, str) and model.startswith("@cf/"):
-        body["model"] = model.rsplit("/", 1)[-1]
-    if not isinstance(body.get("model"), str):
-        body["model"] = "clef-flash"
-    try:
-        result = _execute(body)
-    except HTTPException as error:
-        return JSONResponse(
-            status_code=error.status_code,
-            content={
-                "result": None,
-                "success": False,
-                "errors": [{"code": error.status_code, "message": str(error.detail)}],
-                "messages": [],
-            },
-        )
-    return {"result": result, "success": True, "errors": [], "messages": []}
-
-
-@app.post("/client/v4/accounts/{account_id}/ai/run/@cf/cloudflare/clef-flash")
-def cf_run_clef_flash(account_id: str, request: dict):
-    return _cf_wrap(request)
-
-
-@app.post("/client/v4/accounts/{account_id}/ai/run")
-def cf_run_universal(account_id: str, request: dict):
-    return _cf_wrap(request, universal=True)
