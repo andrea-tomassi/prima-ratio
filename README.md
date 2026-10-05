@@ -63,7 +63,7 @@ curl -s localhost:8000/v1/models
 |---|---|
 | `POST /v1/systemone` | The decision endpoint: `state` (string, JSON, or chat messages) + typed `questions` → probabilities for every option. Images ride in `images` or as message parts — see *System One conformance* below. |
 | `POST /client/v4/accounts/{account_id}/ai/run/@cf/cloudflare/clef-flash` | **Cloudflare Workers AI-compatible surface**: same request, response wrapped in the CF envelope (`result`, `success`, `errors`, `messages`). |
-| `POST /client/v4/accounts/{account_id}/ai/run` | The universal CF form (model id in the body). |
+| `POST /client/v4/accounts/{account_id}/ai/run` | The universal CF form: `{"model": "@cf/cloudflare/clef-flash", "input": {…}}`. |
 | `GET /v1/models` | The served model (OpenAI shape, `meta` carries engine info). |
 | `GET /healthz` | Liveness + model id. |
 

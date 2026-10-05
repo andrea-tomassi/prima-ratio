@@ -126,8 +126,29 @@ def systemone_endpoint(request: dict) -> dict:
 # {"result": {...}, "success": true, "errors": [], "messages": []}.
 
 
-def _cf_wrap(request: dict):
+def _cf_wrap(request: dict, *, universal: bool = False):
     body = dict(request)
+    if universal:
+        # The universal route nests the model schema under `input` and uses the
+        # full model id — same contract as the hosted endpoint (400 otherwise).
+        schema = body.get("input")
+        if not isinstance(schema, dict):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "result": None,
+                    "success": False,
+                    "errors": [{"code": 7000, "message": "Invalid request body: input"}],
+                    "messages": [],
+                },
+            )
+        body = dict(schema)
+        if not isinstance(body.get("model"), str):
+            outer = request.get("model")
+            body["model"] = outer if isinstance(outer, str) else "clef-flash"
+    model = body.get("model")
+    if isinstance(model, str) and model.startswith("@cf/"):
+        body["model"] = model.rsplit("/", 1)[-1]
     if not isinstance(body.get("model"), str):
         body["model"] = "clef-flash"
     try:
@@ -152,4 +173,4 @@ def cf_run_clef_flash(account_id: str, request: dict):
 
 @app.post("/client/v4/accounts/{account_id}/ai/run")
 def cf_run_universal(account_id: str, request: dict):
-    return _cf_wrap(request)
+    return _cf_wrap(request, universal=True)
