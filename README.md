@@ -12,7 +12,9 @@ It ships as **one Docker image, one engine in VRAM**: pull, run, done — the
 image sets itself up on first start and serves **typed text decisions**
 (yes/no, multiple-choice, scores) and **image-conditioned decisions** on the
 same weights. API-compatible with TypeSafe's System One / Jev pattern
-and its open multimodal extension.
+and its open multimodal extension. It serves its own decisions — **not a
+gateway**: no proxying, no provider adaptation; multi-provider routing
+belongs to the clients.
 
 Independent project; not affiliated with Cloudflare, TypeSafe, Jev or SemIf.
 
