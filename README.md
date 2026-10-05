@@ -11,8 +11,9 @@ captioning. Confidence you can classify, verify and gate on.
 It ships as **one Docker image, one engine in VRAM**: pull, run, done — the
 image sets itself up on first start and serves **typed text decisions**
 (yes/no, multiple-choice, scores) and **image-conditioned decisions** on the
-same weights. API-compatible with TypeSafe's System One / Jev pattern
-and its open multimodal extension.
+same weights. API-compatible with TypeSafe's System One / Jev pattern,
+with its open multimodal extension — and served **Cloudflare-compatible**:
+the hosted Workers AI surface (`/ai/run`) is mirrored for drop-in switching.
 
 Independent project; not affiliated with Cloudflare, TypeSafe, Jev or SemIf.
 
@@ -61,6 +62,8 @@ curl -s localhost:8000/v1/models
 | Endpoint | What |
 |---|---|
 | `POST /v1/systemone` | The decision endpoint: `state` (string, JSON, or chat messages) + typed `questions` → probabilities for every option. Images ride in `images` or as message parts — see *System One conformance* below. |
+| `POST /client/v4/accounts/{account_id}/ai/run/@cf/cloudflare/clef-flash` | **Cloudflare Workers AI-compatible surface**: same request, response wrapped in the CF envelope (`result`, `success`, `errors`, `messages`). |
+| `POST /client/v4/accounts/{account_id}/ai/run` | The universal CF form (model id in the body). |
 | `GET /v1/models` | The served model (OpenAI shape, `meta` carries engine info). |
 | `GET /healthz` | Liveness + model id. |
 
@@ -107,12 +110,14 @@ the reference cited by the llama.cpp decision-model docs:
   decided together, in one forward pass.
 - **`answers`** — `noul`: the probability of `true`; `choice` and `score`: the
   winning option or the expected level, the full distribution, and
-  `confidence` — the TypeSafe concentration measure:
-  `(n·pmax − 1) / (n − 1)` for choices, `1 − spread / evenSpread` for scores
-  (see [Confidence](https://docs.typesafe.ai/confidence)). `0` means the
-  options are equally likely.
+  `confidence` — normalized concentration (Gini purity):
+  `(n·Σpᵢ² − 1) / (n − 1)`. This is the definition used by the hosted
+  Cloudflare Workers AI `@cf/cloudflare/clef-flash` endpoint (verified against
+  it to 4 decimals); TypeSafe's margin/spread and OpenJev's entropy are the
+  other definitions in the wild. `0` means the options are equally likely.
 - **Local extensions** travel in extra fields (`x_prima`: latency and version)
-  and can be ignored by standard clients.
+  and can be ignored by standard clients. On the CF surface the body is wrapped
+  as `{"result": {…}, "success": true, "errors": [], "messages": []}`.
 
 Decisions conditioned on an image, the standard way:
 

@@ -3,15 +3,17 @@
 Two public references define the contract applied here:
 
 - TypeSafe's System One API (https://docs.typesafe.ai): ``state`` is a string
-  or a structured JSON value, answers carry probabilities, and ``confidence``
-  is a 0-1 concentration measure defined per question type
-  (https://docs.typesafe.ai/confidence).
+  or a structured JSON value, and answers carry probabilities.
 - The multimodal extension — the reference cited by the llama.cpp
   ``/v1/systemone`` docs (https://jev-skills.github.io/openjev-multimodal/api):
   images travel either in a top-level ``images`` array of data URLs and/or as
   ``image_url`` parts inside a chat-message state; all images are read before
   the state in the prompt, the ``images`` field first, and the parts are
   removed from the state.
+
+``confidence`` follows the Cloudflare Workers AI clef-flash definition:
+normalized concentration (Gini purity) ``(n·Σpᵢ² − 1)/(n − 1)``, verified
+against the hosted endpoint to 4 decimals.
 
 The vendored engine file stays verbatim (see VENDORED.md): everything the
 engine does not implement of the wire contract is applied here, around the
@@ -112,48 +114,41 @@ def normalize_request(body: dict) -> dict:
     return body
 
 
-def choice_confidence(probabilities: dict[str, float]) -> float:
-    """TypeSafe Choice confidence: ``(n·pmax − 1) / (n − 1)``, clamped to 0-1.
+def _concentration(probabilities: dict[str, float]) -> float:
+    """Normalized concentration (Gini purity): ``(n·Σpᵢ² − 1) / (n − 1)``.
 
-    ``0`` means all options are equally likely, ``1`` means a single peak.
+    ``0`` means the options are equally likely, ``1`` means all mass on one.
+    This is the ``confidence`` definition of the Cloudflare Workers AI
+    clef-flash endpoint — verified against the hosted API to 4 decimals on 48
+    choice/score answers (2026-10-05). TypeSafe's margin/spread formulas and
+    OpenJev's entropy formula are the other definitions in the wild.
     """
     values = list(probabilities.values())
     count = len(values)
     if count < 2:
         return 1.0
-    peak = max(values)
-    return max(0.0, min(1.0, (count * peak - 1.0) / (count - 1.0)))
+    purity = sum(value * value for value in values)
+    return max(0.0, min(1.0, (count * purity - 1.0) / (count - 1.0)))
+
+
+def choice_confidence(probabilities: dict[str, float]) -> float:
+    """``confidence`` for a choice answer (see :func:`_concentration`)."""
+    return _concentration(probabilities)
 
 
 def score_confidence(probabilities: dict[str, float]) -> float:
-    """TypeSafe Score confidence: ``1 − spread/evenSpread`` (docs.typesafe.ai/confidence).
-
-    ``spread`` is the probability mass weighted by its distance from the peak
-    level; ``evenSpread`` is the spread of a flat distribution over the levels.
-    ``0`` means the levels are equally likely, ``1`` means all mass on the peak.
-    """
-    count = len(probabilities)
-    try:
-        values = [probabilities[str(index)] for index in range(count)]
-    except KeyError:  # levels not keyed 0..n-1: keep the reported order
-        values = list(probabilities.values())
-    if count < 2:
-        return 1.0
-    peak = max(range(count), key=values.__getitem__)
-    spread = sum(value * abs(index - peak) for index, value in enumerate(values))
-    even_spread = sum(abs(index - (count - 1) / 2) for index in range(count)) / count
-    if even_spread == 0:
-        return 1.0
-    return max(0.0, min(1.0, 1.0 - spread / even_spread))
+    """``confidence`` for a score answer (see :func:`_concentration`)."""
+    return _concentration(probabilities)
 
 
 def normalize_response(response: dict) -> dict:
-    """Rewrite ``confidence`` on choice/score answers with the standard formulas.
+    """Rewrite ``confidence`` on choice/score answers with the standard formula.
 
-    The engine reports the chosen option's probability; the wire standard defines
-    confidence as a concentration measure instead (docs.typesafe.ai/confidence).
-    Probability distributions and every other field are left untouched; ``noul``
-    answers have no confidence field, as per the standard.
+    The engine reports the chosen option's probability; the wire contract defines
+    confidence as normalized concentration instead (Gini purity, matching the
+    Cloudflare Workers AI clef-flash endpoint). Probability distributions and
+    every other field are left untouched; ``noul`` answers have no confidence
+    field, as per the standard.
     """
     answers = response.get("answers")
     if not isinstance(answers, dict):

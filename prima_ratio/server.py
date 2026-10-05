@@ -7,8 +7,15 @@ forward pass per request, no generation, no chat.
 Engine: Clef-Flash (Qwen3.5-9B backbone + joint schema head, nf4) with its vision
 lens. The model is already calibrated (raw ECE ≈ 0.02 on the public decision
 suites); probabilities are returned as-is. Wire-standard conformance
-(message-part images, TypeSafe confidence formulas) is applied by
+(message-part images, confidence formulas) is applied by
 `prima_ratio.standard` around the vendored engine call.
+
+Two surfaces are served:
+
+- `/v1/systemone` — the flat Jev/System One body (`model`, `answers`, `usage`).
+- `/client/v4/accounts/{account_id}/ai/run[/@cf/cloudflare/clef-flash]` — a
+  drop-in for the hosted Cloudflare Workers AI endpoint: same request, the
+  response wrapped in the CF envelope (`result`, `success`, `errors`, `messages`).
 """
 from __future__ import annotations
 
@@ -18,6 +25,7 @@ import os
 import time
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 
 from . import standard
 
@@ -68,8 +76,8 @@ def models() -> dict:
     }
 
 
-@app.post("/v1/systemone")
-def systemone_endpoint(request: dict) -> dict:
+def _execute(request: dict) -> dict:
+    """Run one System One request: normalize, decode images, decide, normalize back."""
     from .clef import load
     from .engine.joint_schema_model import systemone
 
@@ -105,3 +113,43 @@ def systemone_endpoint(request: dict) -> dict:
         raise
     response["x_prima"] = {"latency_s": round(time.perf_counter() - started, 3), "version": VERSION}
     return response
+
+
+@app.post("/v1/systemone")
+def systemone_endpoint(request: dict) -> dict:
+    return _execute(request)
+
+
+# ---- Cloudflare Workers AI-compatible surface --------------------------------
+# Drop-in for the hosted `@cf/cloudflare/clef-flash` endpoint: same request
+# body, same core, response wrapped in the CF envelope
+# {"result": {...}, "success": true, "errors": [], "messages": []}.
+
+
+def _cf_wrap(request: dict):
+    body = dict(request)
+    if not isinstance(body.get("model"), str):
+        body["model"] = "clef-flash"
+    try:
+        result = _execute(body)
+    except HTTPException as error:
+        return JSONResponse(
+            status_code=error.status_code,
+            content={
+                "result": None,
+                "success": False,
+                "errors": [{"code": error.status_code, "message": str(error.detail)}],
+                "messages": [],
+            },
+        )
+    return {"result": result, "success": True, "errors": [], "messages": []}
+
+
+@app.post("/client/v4/accounts/{account_id}/ai/run/@cf/cloudflare/clef-flash")
+def cf_run_clef_flash(account_id: str, request: dict):
+    return _cf_wrap(request)
+
+
+@app.post("/client/v4/accounts/{account_id}/ai/run")
+def cf_run_universal(account_id: str, request: dict):
+    return _cf_wrap(request)
