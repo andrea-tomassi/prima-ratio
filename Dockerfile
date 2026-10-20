@@ -16,6 +16,7 @@ RUN cd llama.cpp \
     && cmake -B build \
         -DGGML_CUDA=ON \
         -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89" \
+        -DGGML_NATIVE=OFF \
         -DBUILD_SHARED_LIBS=OFF \
         -DLLAMA_CURL=OFF \
     && cmake --build build -j"$(nproc)" --target llama-server
