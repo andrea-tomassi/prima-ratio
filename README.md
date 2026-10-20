@@ -1,173 +1,125 @@
 # 🌳 prima-ratio
 
-**Text or images in. Typed decisions out.**
+**Typed decisions with a probability for every option, in one Docker — powered by
+[Decision 3.0 mini](https://huggingface.co/vllm-sr/d3-mini) on [llama.cpp](https://github.com/ggml-org/llama.cpp).**
 
-A calibrated **System One** — like Jev, running locally with no external APIs —
-in a single 16 GB VRAM package. Point it at a message, a record, or a photo,
-ask your questions, and read the answers as **typed decisions with
-probabilities**, straight off the model: no generation, no parsing, no
-captioning. Confidence you can classify, verify and gate on.
+Give it a state (text or JSON, optionally with images) and typed questions: pick
+one of several options (`choice`), yes / no (`noul`), or a level (`score`). It
+answers in one pass and returns a probability for every option — no generation,
+no parsing, no retry loops.
 
-It ships as **one Docker image, one engine in VRAM**: pull, run, done — the
-image sets itself up on first start and serves **typed text decisions**
-(yes/no, multiple-choice, scores) and **image-conditioned decisions** on the
-same weights. API-compatible with TypeSafe's System One / Jev pattern
-and its open multimodal extension. It serves its own decisions — **not a
-gateway**: no proxying, no provider adaptation; multi-provider routing
-belongs to the clients.
+- 🎚️ **Calibrated out of the box.** The d3 readout is trained for it: ECE ≈ 0.04
+  on the public typed-decisions suite, no temperature tuning.
+- 👁️ **Images, natively.** PNG/JPEG/WebP up to 1.6 MP, several per request; every
+  question sees them. No captioning step.
+- 📏 **40K-token states** on a 16 GB consumer card (`PRIMA_CTX`), vision included.
+- ⚡ **~100 ms** for a short three-question decision; ~10 s for a 28K-token state.
+- 🧰 **One endpoint** — `POST /v1/systemone` — and a 4 GB model download on first
+  start. No Python, no torch, no vLLM in the runtime image.
 
-Independent project; not affiliated with Cloudflare, TypeSafe, Jev or SemIf.
+## Engine
 
-![license](https://img.shields.io/badge/license-MIT-0a0a0a) ![GPU](https://img.shields.io/badge/NVIDIA-%E2%89%A516GB_VRAM-76b900) ![API](https://img.shields.io/badge/API-System_One-0a0a0a)
+| | |
+|---|---|
+| Model | Decision 3.0 mini — 4.54B (Qwen3.5-4B + 0.33B vision encoder), Apache-2.0 |
+| Weights | `vllm-d3-mini-Q4_K_M.gguf` + `mmproj-…-Q8_0.gguf` (ggml-org conversion) |
+| Runtime | llama.cpp, pinned commit with the `vllm-d3` decision support |
+| Config | 40,960 ctx · `q8_0` KV cache · Flash Attention · all layers on GPU |
 
----
+The d3 readout uses **non-causal attention**: the whole state must fit one
+micro-batch, so `-b`/`-ub` are pinned to the context size. That is what caps the
+context on 16 GB (the compute buffer grows ~170 KB/token). Longer contexts need a
+bigger card or a smaller d3 (d3-lite 0.8B, d3-nano 2B).
 
-## 💪 Strengths
+## Benchmarks (RTX 4060 Ti 16 GB, Q4_K_M)
 
-- 🔑 **Turn-the-key System One.** Pull, run, ask: typed decisions with
-  probabilities from the very first call — no prompt engineering, no answer
-  parsing, no JSON repair, no retry loops.
-- 👁️ **Image support, natively.** Send a photo instead of a state string: the
-  same typed decisions work on images, probabilities read straight off the
-  model — **no captioning step in between**.
-- 🎚️ **Calibrated out of the box.** Probabilities come from a decision head
-  trained for it: top-label ECE ≈ 0.02 on the public typed-decision suite, with
-  no temperature tuning required.
-- 🧠 **One forward pass.** No sampling, no reasoning tokens, no generation:
-  latency is one prefill — a few hundred milliseconds per decision on a 16 GB
-  consumer card.
-- 📏 **Long context, unlocked.** A chunked prefill feeds the backbone in 4K
-  slices while the hybrid cache is carried across them — **~95K-token states
-  on a 16 GB card**, with probabilities identical to the one-shot path.
-- 🧰 **Decisions only, on purpose.** One endpoint, one contract: if you need a
-  chat model, run a chat model.
+| Suite | Result |
+|---|---|
+| a144 (144 authored decisions) | **0.9444** acc (0.9299 balanced) |
+| Typed-decisions (400 cases) | **0.727** acc · ECE 0.036 · W1 0.956 |
+| typesafe102 | **0.8453** |
+| Email triage (47-email clean set) | **AUC 0.949** · 6/17 false alarms at 100% recall · 0.82 s |
+| Jev Decision Index 0.3.2 (official text board) | **52.6** |
+| Latency (3 questions, short text) | **~100 ms** |
+| Latency (28.7K-token state) | **10.8 s** |
 
-## 🚀 Quick Start (NVIDIA GPU)
+## Quick start
 
 ```bash
-docker run -d --name prima-ratio --gpus all \
-  -p 8000:8000 \
+docker run -d --name prima-ratio --gpus all -p 8000:8000 \
   -v prima-cache:/cache \
   ghcr.io/andrea-tomassi/prima-ratio:latest
 ```
 
-First start downloads the engine (~8 GB, nf4 + vision) into the mounted cache;
-later restarts and image upgrades reuse it. Then:
+First start downloads ~4.1 GB of weights into `/cache` (keep the volume mounted:
+restarts and upgrades reuse it).
 
 ```bash
-curl -s localhost:8000/v1/models
-```
-
-## 🔌 Endpoints
-
-| Endpoint | What |
-|---|---|
-| `POST /v1/systemone` | The decision endpoint: `state` (string, JSON, or chat messages) + typed `questions` → probabilities for every option. Images ride in `images` or as message parts — see *System One conformance* below. |
-| `GET /v1/models` | The served model (OpenAI shape, `meta` carries engine info). |
-| `GET /healthz` | Liveness + model id. |
-
-## 🎯 Decisions in one call
-
-```bash
-curl -s localhost:8000/v1/systemone -H "Content-Type: application/json" -d '{
-  "state": "Our checkout started returning errors and orders are blocked.",
+curl -s localhost:8000/v1/systemone -H 'content-type: application/json' -d '{
+  "model": "d3-mini",
+  "state": "The order arrived damaged yesterday. The customer has a receipt and asks for a replacement today.",
   "questions": {
-    "department": {
-      "type": "choice",
-      "instructions": "Which team should handle the message?",
-      "criteria": {"billing": "Payments or invoices", "technical": "Bugs or outages"}
-    },
-    "urgency": {
-      "type": "score",
-      "instructions": "How urgent is this?",
-      "criteria": ["Can wait", "This week", "Today"]
-    },
-    "outage": {"type": "noul", "instructions": "Is a service down?"}
+    "team": {"type": "choice", "instructions": "Which team should handle this request?",
+             "criteria": {"returns": "Refunds, replacements and damaged deliveries",
+                          "billing": "Payments, invoices and charges",
+                          "technical": "Product setup and faults"}},
+    "receipt": {"type": "noul", "instructions": "Does the customer have a receipt?"},
+    "urgency": {"type": "score", "instructions": "How urgent is this request?",
+                "criteria": ["Routine", "Soon", "Today"]}
   }
 }'
 ```
 
-## 🧭 System One conformance
-
-`POST /v1/systemone` follows the [TypeSafe System One API](https://docs.typesafe.ai)
-— the same contract as Jev — extended with the multimodal conventions of the
-[OpenJev Multimodal API](https://jev-skills.github.io/openjev-multimodal/api),
-the reference cited by the llama.cpp decision-model docs:
-
-- **`state`** — a string, a JSON object or array; a value that is not a string
-  is given to the model as JSON text. Message-shaped states are accepted too:
-  an array of chat messages, or an object with a `messages` array (metadata is
-  preserved).
-- **`images`** *(extension)* — an array of `data:image/...;base64,...` data
-  URLs (bare base64 strings are accepted too); `image_url` parts inside message
-  contents are read the same way (data URLs only). All images are placed before
-  the state in the prompt — the `images` field first, then the parts — and the
-  image parts are removed from the state.
-- **`questions`** — `choice` (2–255 options, `null` descriptions allowed),
-  `score` (2–10 ordered levels), `noul` (optional `true`/`false` criteria);
-  `instructions` can be a string, an object or an array. All questions are
-  decided together, in one forward pass.
-- **`answers`** — `noul`: the probability of `true`; `choice` and `score`: the
-  winning option or the expected level, the full distribution, and
-  `confidence` — normalized concentration (Gini purity):
-  `(n·Σpᵢ² − 1) / (n − 1)`. This is the definition used by the hosted
-  Cloudflare Workers AI `@cf/cloudflare/clef-flash` endpoint (verified against
-  it to 4 decimals); TypeSafe's margin/spread and OpenJev's entropy are the
-  other definitions in the wild. `0` means the options are equally likely.
-- **Local extensions** travel in extra fields (`x_prima`: latency and version)
-  and can be ignored by standard clients.
-
-Decisions conditioned on an image, the standard way:
+Images go in `images` as base64 data URLs (or http(s) URLs); every question of
+the request sees them:
 
 ```bash
-curl -s localhost:8000/v1/systemone -H "Content-Type: application/json" -d '{
-  "state": "A document uploaded by a customer.",
-  "images": ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUg..."],
-  "questions": {
-    "kind": {
-      "type": "choice",
-      "instructions": "What kind of document is this?",
-      "criteria": {"invoice": null, "receipt": null, "contract": null, "other": null}
-    }
-  }
-}'
+curl -s localhost:8000/v1/systemone -H 'content-type: application/json' --data-binary @- <<JSON
+{"model":"d3-mini","state":"The customer attached the receipt.",
+ "images":["data:image/png;base64,$(base64 -w0 receipt.png)"],
+ "questions":{"on_receipt":{"type":"noul","instructions":"Does the receipt list a blender?"}}}
+JSON
 ```
 
-## 📊 Benchmarks
+## Endpoints
 
-Full tables, harnesses and reproduction notes live in
-[BENCHMARKS.md](BENCHMARKS.md). Headline results of the current engine
-(Clef-Flash nf4, 16 GB card):
+| Method | Path | |
+|---|---|---|
+| POST | `/v1/systemone` | typed decisions (choice / noul / score), probabilities per option |
+| GET | `/v1/models` | the served model and its limits |
+| GET | `/health` | readiness probe |
 
-| Suite | Result |
-|---|---|
-| Bespoke-Nimble (13 subsets, 3,880 records) | **76.6 % macro / 77.6 % micro** |
-| Typed-decisions (400 cases) | **Acc 0.70 · ECE 0.018 · W1 0.97** |
-| Decision latency | **~0.3 s** per record, one forward pass |
+The server is llama.cpp's own; `PRIMA_EXTRA_ARGS="--api-key <key>"` enables
+bearer authentication.
 
-## 🗺️ Roadmap
+## Environment
 
-- vLLM backend (native vision, faster kernels)
-- Optional per-workload calibration variants
-- CPU / Apple-silicon execution paths
+| Variable | Default | Meaning |
+|---|---|---|
+| `PRIMA_CACHE` | `/cache` | model cache — mount a volume here |
+| `PRIMA_MODEL_REPO` | `ggml-org/vllm-d3-mini-GGUF` | weights repo |
+| `PRIMA_MODEL_REVISION` | pinned commit | HF revision |
+| `PRIMA_MODEL_FILE` | `vllm-d3-mini-Q4_K_M.gguf` | weights (Q4_K_M benchmarked) |
+| `PRIMA_MMPROJ_FILE` | `mmproj-vllm-d3-mini-Q8_0.gguf` | vision projector |
+| `PRIMA_CTX` | `40960` | context in tokens (`-b`/`-ub` follow it) |
+| `PRIMA_KV_TYPE` | `q8_0` | KV cache type |
+| `PRIMA_PORT` | `8000` | HTTP port |
+| `PRIMA_EXTRA_ARGS` | — | extra `llama-server` flags |
 
-## 🔐 Security
+## Security
 
-🔒 LAN-only by default — put the service behind a reverse proxy with auth for
-any external exposure.
+🔒 LAN-only by default — put the service behind a reverse proxy with auth for any
+external exposure, or set `PRIMA_EXTRA_ARGS="--api-key <key>"`.
 
-## 🙏 Credits
+## Roadmap
 
-- [Clef](https://huggingface.co/Cloudflare/clef-flash) (Cloudflare, Apache-2.0)
-  — the decision model and its joint schema head; vendored verbatim, see
-  [VENDORED.md](VENDORED.md) and [NOTICE](NOTICE).
-- [SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev) — the project that
-  inspired the original engine (v1.x). Thank you.
-- [TypeSafe](https://docs.typesafe.ai/api) — the System One API pattern.
-- [llama.cpp](https://github.com/ggml-org/llama.cpp) — the `/v1/systemone`
-  reference implementation; [OpenJev Multimodal](https://jev-skills.github.io/openjev-multimodal/)
-  — the multimodal API reference.
+- Longer contexts (bigger GPU / smaller d3 sizes / chunked decision variants)
+- Video inputs (the transformers runtime supports them; llama.cpp does not yet)
+- vLLM Engine-mode server for batched multi-client serving
 
-## 📄 License
+## Credits & license
 
-MIT
+Engine: [llama.cpp](https://github.com/ggml-org/llama.cpp) (MIT). Model:
+[Decision 3.0 mini](https://huggingface.co/vllm-sr/d3-mini) (Apache-2.0) by vLLM
+Semantic Router, GGUF conversion by [ggml-org](https://huggingface.co/ggml-org/vllm-d3-mini-GGUF).
+See [NOTICE](NOTICE). The packaging is released under the license in [LICENSE](LICENSE).

@@ -1,24 +1,21 @@
 services:
   prima-ratio:
-    image: ${PRIMA_IMAGE:-ghcr.io/andrea-tomassi/prima-ratio:latest}
-    container_name: prima-ratio
+    image: ghcr.io/andrea-tomassi/prima-ratio:latest
+    build: .
     ports:
       - "8000:8000"
-      - "10000:8000"          # second port kept for the reverse-proxy route
-    environment:
-      - PRIMA_MODEL_NAME=prima-ratio-clef-flash
-      # - PRIMA_MODEL_REPO=meossistant/clef-flash-4bit   # nf4 weights + joint head (default)
-      # - PRIMA_MODEL_PATH=/cache/models/…               # explicit local directory override
-      - PRIMA_PORT=8000
-      - PRIMA_MAX_LENGTH=16384                            # decision context (tokens)
-      - HF_HOME=/cache/huggingface
+    gpus: all
     volumes:
-      - ${PRIMA_CACHE_DIR:-./cache}:/cache                # model + HF cache (survives restarts)
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    restart: unless-stopped
+      - prima-cache:/cache
+    environment:
+      PRIMA_CTX: "40960"
+      # PRIMA_EXTRA_ARGS: "--api-key change-me"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${PRIMA_PORT:-8000}/health >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      start_period: 180s
+      retries: 3
+
+volumes:
+  prima-cache:

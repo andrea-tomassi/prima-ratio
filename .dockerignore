@@ -1,13 +1,6 @@
-.git
-.github
-build/
 benchmarks/
+tests/
 assets/
-calibration/
-_calib-*
-CONFRONTO-MOTORI.md
+.github/
 *.md
-!README.md
-__pycache__/
-*.pyc
-.venv/
+.git/

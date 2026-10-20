@@ -1,19 +1,17 @@
-prima-ratio
-Copyright (c) 2026 Andrea Tomassi
+prima-ratio bundles no third-party source code of its own: the container is
+built from upstream projects and a public model checkpoint.
 
-This product includes software from Clef (Cloudflare), Apache License 2.0:
-  https://huggingface.co/Cloudflare/clef-flash
+Engine
+- llama.cpp — https://github.com/ggml-org/llama.cpp — MIT License.
+  Pinned commit: see LLAMA_CPP_COMMIT in the Dockerfile. llama.cpp added the
+  Decision 3.0 (vllm-sr d3) model family support in ggml-org/llama.cpp #30383.
 
-The vendored module prima_ratio/engine/joint_schema_model.py is kept verbatim
-from the Clef-Flash release: it implements the record encoding (state, typed
-questions, option spans, images/videos), the joint schema head and the
-SystemOne request/response mapping. See VENDORED.md for details.
+Model
+- Decision 3.0 mini (d3-mini) — https://huggingface.co/vllm-sr/d3-mini — Apache-2.0.
+  A 4.54B multimodal decision model from vLLM Semantic Router, built on
+  Qwen/Qwen3.5-4B with an answer-code readout.
+- GGUF conversion — https://huggingface.co/ggml-org/vllm-d3-mini-GGUF — Apache-2.0.
+  Downloaded on first start at the revision pinned in the Dockerfile.
 
-The served weights (nf4 quantization of Clef-Flash with the joint head) come
-from https://huggingface.co/meossistant/clef-flash-4bit, itself a quantization
-of Cloudflare's Clef-Flash (Apache-2.0).
-
-prima-ratio's decision-service lineage — a local, calibrated, Jev-shaped
-System One — started from SemIf (https://github.com/TheoLeeCJ/SemIf-OpenJev,
-MIT). prima-ratio is an independent project, not affiliated with or endorsed
-by Cloudflare, TypeSafe, Jev or SemIf.
+The prima-ratio packaging (Dockerfile, entrypoint, docs) is released under the
+license in LICENSE.

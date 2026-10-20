@@ -1,56 +1,54 @@
-# prima-ratio 2.0.2 — turn-key System One decision service.
-#
-# Engine: Clef-Flash nf4 (Qwen3.5-9B backbone + joint schema head + vision tower),
-# served by torch + bitsandbytes. The pip torch wheels bundle their own CUDA
-# runtime libraries, so a lean Ubuntu base is enough — the NVIDIA container
-# runtime injects the driver at run time (`--gpus all`).
+# syntax=docker/dockerfile:1
+
+# ---- builder: llama.cpp with the Decision 3.0 (vllm-sr d3) support ----------
+# Pinned: the commit that introduced the vllm-d3 decision model support
+# (ggml-org/llama.cpp #30383, merged 2026-10-12).
+FROM nvidia/cuda:12.8.1-devel-ubuntu24.04 AS builder
+ARG LLAMA_CPP_COMMIT=3bb63cbcb
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git cmake build-essential ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+RUN git clone https://github.com/ggml-org/llama.cpp.git \
+    && cd llama.cpp \
+    && git checkout ${LLAMA_CPP_COMMIT}
+RUN cd llama.cpp \
+    && cmake -B build \
+        -DGGML_CUDA=ON \
+        -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89" \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DLLAMA_CURL=OFF \
+    && cmake --build build -j"$(nproc)" --target llama-server
+
+# ---- runtime -----------------------------------------------------------------
 FROM ubuntu:24.04
-
-# flash-attention 2 ships a prebuilt wheel for this exact torch/cu126/cp312 combo
-# on x86_64 only — arm64 falls back to sdpa (the server detects it at load time).
-ARG TARGETARCH
-
-ENV DEBIAN_FRONTEND=noninteractive \
-    PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && python3 -m venv /opt/venv
-
-ENV PATH="/opt/venv/bin:${PATH}"
-
-WORKDIR /app
-COPY pyproject.toml README.md LICENSE NOTICE /app/
-COPY prima_ratio /app/prima_ratio
-
-# torch first (its own index), then flash-attention 2 (prebuilt wheel for this
-# exact torch/cu126/cp312 combo — see the repo's releases), then the package.
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu126 \
-    && pip install --no-cache-dir einops ninja \
-    && if [ "${TARGETARCH:-amd64}" = "amd64" ]; then pip install --no-cache-dir "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.10.0/flash_attn-2.6.3%2Bcu126torch2.14-cp312-cp312-linux_x86_64.whl"; fi \
-    && pip install --no-cache-dir .
-
-# gcc: bitsandbytes compiles its nf4 kernels through triton at first use
-# (runtime need — a late layer keeps the pip layers cached).
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc python3-dev \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl tini \
     && rm -rf /var/lib/apt/lists/*
 
-# The model (~8 GB, nf4 + joint head) is downloaded on first start into the cache:
-# mount /cache and it survives restarts and image upgrades.
-ENV PRIMA_CACHE=/cache \
-    HF_HOME=/cache/huggingface \
-    TRITON_CACHE_DIR=/cache/triton \
-    PRIMA_PORT=8000 \
-    PRIMA_MODEL_NAME=prima-ratio-clef-flash
+COPY --from=builder /src/llama.cpp/build/bin/llama-server /opt/llama/llama-server
+COPY --from=builder /usr/local/cuda/targets/x86_64-linux/lib/libcudart.so.12* /opt/cuda-libs/
+COPY --from=builder /usr/local/cuda/targets/x86_64-linux/lib/libcublas.so.12* /opt/cuda-libs/
+COPY --from=builder /usr/local/cuda/targets/x86_64-linux/lib/libcublasLt.so.12* /opt/cuda-libs/
+COPY entrypoint.sh /usr/local/bin/prima-ratio-entrypoint
+RUN chmod +x /usr/local/bin/prima-ratio-entrypoint
 
-VOLUME ["/cache"]
+# Benchmarked config on a 16 GB card: Q4_K_M weights, 40,960-token context,
+# q8_0 KV cache, Flash Attention. The whole state must fit one micro-batch
+# (the d3 readout is non-causal), hence -b/-ub pinned to the context size.
+ENV LD_LIBRARY_PATH=/opt/cuda-libs \
+    PRIMA_CACHE=/cache \
+    PRIMA_MODEL_REPO=ggml-org/vllm-d3-mini-GGUF \
+    PRIMA_MODEL_REVISION=e7230e2309c186c80182fbeed6fef70680b20c64 \
+    PRIMA_MODEL_FILE=vllm-d3-mini-Q4_K_M.gguf \
+    PRIMA_MMPROJ_FILE=mmproj-vllm-d3-mini-Q8_0.gguf \
+    PRIMA_CTX=40960 \
+    PRIMA_KV_TYPE=q8_0 \
+    PRIMA_PORT=8000
+
+VOLUME /cache
 EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=3 \
+    CMD curl -fsS "http://127.0.0.1:${PRIMA_PORT}/health" >/dev/null || exit 1
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=600s \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4)"
-
-CMD ["python", "-m", "prima_ratio"]
+ENTRYPOINT ["tini", "--", "/usr/local/bin/prima-ratio-entrypoint"]
