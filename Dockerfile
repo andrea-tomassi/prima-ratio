@@ -23,13 +23,14 @@ RUN cd llama.cpp \
 # ---- runtime -----------------------------------------------------------------
 FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl tini \
+        ca-certificates curl tini libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /src/llama.cpp/build/bin/llama-server /opt/llama/llama-server
-COPY --from=builder /usr/local/cuda/targets/x86_64-linux/lib/libcudart.so.12* /opt/cuda-libs/
-COPY --from=builder /usr/local/cuda/targets/x86_64-linux/lib/libcublas.so.12* /opt/cuda-libs/
-COPY --from=builder /usr/local/cuda/targets/x86_64-linux/lib/libcublasLt.so.12* /opt/cuda-libs/
+COPY --from=builder /usr/local/cuda-12.8/targets/x86_64-linux/lib/libcudart.so.12* /opt/cuda-libs/
+COPY --from=builder /usr/local/cuda-12.8/targets/x86_64-linux/lib/libcublas.so.12* /opt/cuda-libs/
+COPY --from=builder /usr/local/cuda-12.8/targets/x86_64-linux/lib/libcublasLt.so.12* /opt/cuda-libs/
+COPY --from=builder /usr/lib/x86_64-linux-gnu/libnccl.so.2* /opt/cuda-libs/
 COPY entrypoint.sh /usr/local/bin/prima-ratio-entrypoint
 RUN chmod +x /usr/local/bin/prima-ratio-entrypoint
 
